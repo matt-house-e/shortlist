@@ -1,0 +1,108 @@
+"""Shortlist domain-specific Pydantic schemas."""
+
+from enum import Enum
+
+from pydantic import Field
+
+from app.models.schemas.base import BaseSchema
+
+
+class WorkflowPhase(str, Enum):
+    """Workflow phase enumeration."""
+
+    INTAKE = "intake"
+    RESEARCH = "research"
+    ADVISE = "advise"
+
+
+class UserRequirements(BaseSchema):
+    """User requirements for product search."""
+
+    product_type: str = Field(..., description="Type of product the user is looking for")
+    budget_min: float | None = Field(None, description="Minimum budget in USD", ge=0)
+    budget_max: float | None = Field(None, description="Maximum budget in USD", ge=0)
+    must_haves: list[str] = Field(
+        default_factory=list,
+        description="Required features or characteristics",
+    )
+    nice_to_haves: list[str] = Field(
+        default_factory=list,
+        description="Preferred but not required features",
+    )
+    priorities: list[str] = Field(
+        default_factory=list,
+        description="Ordered list of user priorities (e.g., 'price', 'quality', 'brand')",
+    )
+    constraints: list[str] = Field(
+        default_factory=list,
+        description="Constraints or limitations (e.g., 'must ship to Canada', 'eco-friendly only')",
+    )
+
+
+class Candidate(BaseSchema):
+    """Product candidate model."""
+
+    name: str = Field(..., description="Product name")
+    manufacturer: str = Field(..., description="Manufacturer or brand name")
+    official_url: str | None = Field(None, description="Official product URL")
+    description: str | None = Field(None, description="Product description")
+    category: str | None = Field(None, description="Product category or type")
+
+
+class FieldCategory(str, Enum):
+    """Field category enumeration."""
+
+    STANDARD = "standard"
+    CATEGORY = "category"
+    USER_DRIVEN = "user_driven"
+
+
+class DataType(str, Enum):
+    """Data type enumeration for field definitions."""
+
+    STRING = "string"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    LIST = "list"
+    DICT = "dict"
+
+
+class FieldDefinition(BaseSchema):
+    """Definition for a comparison table field."""
+
+    name: str = Field(..., description="Field name")
+    prompt: str = Field(..., description="Prompt to use when extracting this field")
+    data_type: DataType = Field(..., description="Expected data type for this field")
+    category: FieldCategory = Field(
+        ..., description="Field category (standard/category/user-driven)"
+    )
+
+
+class ComparisonTable(BaseSchema):
+    """Comparison table holding enriched candidate data."""
+
+    fields: list[FieldDefinition] = Field(
+        default_factory=list,
+        description="Field definitions for the comparison table",
+    )
+    data: dict[str, dict[str, any]] = Field(
+        default_factory=dict,
+        description="Enriched candidate data, keyed by candidate name",
+    )
+
+
+class RefinementTrigger(str, Enum):
+    """Trigger type for refinement."""
+
+    USER_REQUEST = "user_request"
+    INSUFFICIENT_DATA = "insufficient_data"
+    NEW_REQUIREMENTS = "new_requirements"
+    FIELD_ADDITION = "field_addition"
+
+
+class RefinementEntry(BaseSchema):
+    """Entry tracking a refinement loop iteration."""
+
+    loop_count: int = Field(..., description="Refinement loop iteration number", ge=1)
+    what_changed: str = Field(..., description="Description of what changed in this iteration")
+    trigger: RefinementTrigger = Field(..., description="What triggered this refinement")
