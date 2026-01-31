@@ -2,7 +2,6 @@
 
 import chainlit as cl
 
-from app.config import get_settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,8 +28,6 @@ async def oauth_callback(
     Returns:
         Authenticated User object or None if authentication fails
     """
-    settings = get_settings()
-
     logger.info(f"OAuth callback from provider: {provider_id}")
 
     # TODO: Implement OAuth authentication

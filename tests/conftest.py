@@ -7,6 +7,7 @@ import pytest
 def mock_settings():
     """Mock application settings."""
     from app.config import Settings
+
     return Settings(
         llm_provider="mock",
         openai_api_key="test-key",
