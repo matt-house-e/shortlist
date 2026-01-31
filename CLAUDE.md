@@ -76,3 +76,30 @@ External dependencies are abstracted behind service classes in `app/services/`.
 - Production: AWS ECS Fargate
 - Infrastructure: Terraform modules in `infrastructure/`
 - CI/CD: GitHub Actions in `.github/workflows/`
+
+## GitHub Workflow
+
+When working on issues, follow the conventions in `.claude/commands/`:
+
+### Branch Naming
+See `.claude/commands/create_branch.md` for full details:
+- `feat/<issue>-<description>` - New features (type:story, type:tool)
+- `fix/<issue>-<description>` - Bug fixes (type:bug)
+- `chore/<issue>-<description>` - Technical tasks (type:task)
+- `spike/<issue>-<description>` - Research (type:spike)
+
+### PR Creation
+See `.claude/commands/create_pr.md` for full details:
+- Always reference the issue number
+- Include a summary and test plan
+- Run `make check` before creating PR
+
+### Issue Creation
+See `.claude/commands/create_issue.md` for templates and labeling conventions.
+
+### Working on Issues
+1. Create feature branch from main
+2. Implement the requirements from the issue
+3. Run `make check` to verify
+4. Create PR linking to the issue
+5. Issues have dependencies - check "Blocked by" in issue body
