@@ -1,0 +1,16 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+# TODO: Configure AWS credentials and deployment steps
+# See infrastructure/README.md for setup instructions

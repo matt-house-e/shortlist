@@ -1,0 +1,75 @@
+site_name: Agent Template
+site_description: Multi-agent conversational system template using Chainlit and LangGraph
+site_url: https://your-domain.github.io/agent-template
+
+repo_name: your-org/agent-template
+repo_url: https://github.com/your-org/agent-template
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - LangGraph Workflow: architecture/langgraph-workflow.md
+      - Decisions: architecture/decisions.md
+  - Development:
+      - Getting Started: development/getting-started.md
+      - Local Setup: development/local-setup.md
+      - Testing: development/testing.md
+  - Deployment:
+      - AWS Infrastructure: deployment/aws-infrastructure.md
+      - CI/CD: deployment/ci-cd.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/your-org/agent-template

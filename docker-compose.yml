@@ -1,0 +1,83 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: agent-template-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agent_template
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # LocalStack for S3 emulation
+  localstack:
+    image: localstack/localstack:latest
+    container_name: agent-template-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=0
+      - PERSISTENCE=1
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Database migrations
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-template-migrations
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_template
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - migrate
+
+  # Main application (optional - for testing production build locally)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-template-web
+    # Use host network for LocalStack S3 presigned URLs to work
+    network_mode: "host"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template
+      - S3_ENDPOINT_URL=http://localhost:4566
+      - S3_BUCKET=uploads
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - CHAINLIT_HOST=0.0.0.0
+      - CHAINLIT_PORT=8000
+    volumes:
+      - ./app:/app/app:ro
+      - ./public:/app/public:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    profiles:
+      - web
+
+volumes:
+  postgres_data:
+  localstack_data:
