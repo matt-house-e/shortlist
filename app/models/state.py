@@ -88,15 +88,24 @@ class AgentState(TypedDict, total=False):
     openai_response_id: str | None
 
     # =========================================================================
-    # Domain-Specific Fields (Placeholders)
+    # Domain-Specific Fields (Shortlist)
     # =========================================================================
-    # TODO: Add your domain-specific fields here
-    #
-    # Examples:
-    # - classification_result: dict
-    # - knowledge_context: list[str]
-    # - tools_used: list[str]
-    # - confidence_score: float
+    # User requirements for product search
+    user_requirements: dict[str, Any] | None
+
+    # Product candidates
+    candidates: list[dict[str, Any]]
+
+    # Comparison table with enriched candidate data
+    comparison_table: dict[str, Any] | None
+
+    # Refinement history
+    refinement_history: list[dict[str, Any]]
+
+    # Workflow control flags
+    need_new_search: bool
+    new_fields_to_add: list[str]
+    current_phase: str  # intake, research, advise
 
 
 # =============================================================================
@@ -142,4 +151,12 @@ def create_initial_state(
         web_search_citations=[],
         web_search_sources=[],
         openai_response_id=None,
+        # Shortlist-specific fields
+        user_requirements=None,
+        candidates=[],
+        comparison_table=None,
+        refinement_history=[],
+        need_new_search=False,
+        new_fields_to_add=[],
+        current_phase="intake",
     )
