@@ -85,7 +85,9 @@ class LatticeService:
         """
         self.max_retries = max_retries
         self.batch_size = batch_size
-        logger.info(f"LatticeService initialized (max_retries={max_retries}, batch_size={batch_size})")
+        logger.info(
+            f"LatticeService initialized (max_retries={max_retries}, batch_size={batch_size})"
+        )
 
     def prepare_field_definitions(
         self,
@@ -140,7 +142,9 @@ class LatticeService:
 
         results = []
         for batch_idx, batch in enumerate(batches):
-            logger.info(f"Processing batch {batch_idx + 1}/{len(batches)} ({len(batch)} candidates)")
+            logger.info(
+                f"Processing batch {batch_idx + 1}/{len(batches)} ({len(batch)} candidates)"
+            )
 
             batch_results = await self._enrich_batch(batch, field_definitions)
             results.extend(batch_results)
@@ -218,7 +222,9 @@ class LatticeService:
 
             # Retry logic
             if retry_count < self.max_retries:
-                logger.info(f"Retrying {candidate_id} (attempt {retry_count + 1}/{self.max_retries})")
+                logger.info(
+                    f"Retrying {candidate_id} (attempt {retry_count + 1}/{self.max_retries})"
+                )
                 # Exponential backoff
                 await asyncio.sleep(2**retry_count)
                 return await self._enrich_single_candidate(

@@ -85,7 +85,9 @@ async def advise_node(state: AgentState) -> Command:
         # Add requirements context
         requirements_context = ""
         if requirements:
-            requirements_context = f"\n\nUser Requirements:\n{json.dumps(requirements, indent=2, ensure_ascii=False)}"
+            requirements_context = (
+                f"\n\nUser Requirements:\n{json.dumps(requirements, indent=2, ensure_ascii=False)}"
+            )
 
         # Generate response with full context
         llm_response = await llm_service.generate(
@@ -126,7 +128,9 @@ What is their primary intent?"""
                 system_prompt=ADVISE_SYSTEM_PROMPT,
             )
 
-            logger.info(f"Detected intent: {user_intent.intent_type}, reasoning: {user_intent.reasoning}")
+            logger.info(
+                f"Detected intent: {user_intent.intent_type}, reasoning: {user_intent.reasoning}"
+            )
         else:
             # First turn in ADVISE - just presenting results
             user_intent = UserIntent(
@@ -151,7 +155,9 @@ What is their primary intent?"""
             next_phase = "research"
             need_new_search_flag = True
         elif user_intent.intent_type == "new_fields":
-            logger.info(f"User wants new fields: {user_intent.extracted_fields}, returning to RESEARCH (Enricher only)")
+            logger.info(
+                f"User wants new fields: {user_intent.extracted_fields}, returning to RESEARCH (Enricher only)"
+            )
             goto = "research"
             next_phase = "research"
             need_new_search_flag = False

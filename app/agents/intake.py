@@ -137,7 +137,9 @@ Consider the conversation flow - if the user seems ready to see results or has a
             system_prompt=INTAKE_SYSTEM_PROMPT,
         )
 
-        logger.info(f"Decision: sufficient={decision.requirements_sufficient}, reasoning={decision.reasoning}")
+        logger.info(
+            f"Decision: sufficient={decision.requirements_sufficient}, reasoning={decision.reasoning}"
+        )
 
         # Step 3: Generate conversational response
         if decision.requirements_sufficient:
@@ -182,7 +184,7 @@ Ask about ONE specific thing that would help narrow down the search. Be conversa
                 )
                 response_content = llm_response.content
 
-            llm_response = type('Response', (), {'content': response_content})()
+            llm_response = type("Response", (), {"content": response_content})()
             next_phase = "intake"
             goto = "__end__"  # Return control to user for next input
             logger.info("Staying in INTAKE")

@@ -88,9 +88,10 @@ def generate_field_definitions(product_type: str, requirements: dict) -> list[di
 
         # User-driven fields based on priorities
         priorities = requirements.get("priorities", [])
-        if "temperature" in str(priorities).lower() or "temperature control" in str(
-            requirements.get("must_haves", [])
-        ).lower():
+        if (
+            "temperature" in str(priorities).lower()
+            or "temperature control" in str(requirements.get("must_haves", [])).lower()
+        ):
             fields.append(
                 {
                     "category": "user_driven",
