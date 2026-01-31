@@ -1,7 +1,6 @@
 """Base schema utilities for Pydantic models."""
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
