@@ -138,7 +138,7 @@ def create_initial_state(
     return AgentState(
         messages=[],
         phase="start",
-        current_node="router",
+        current_node="intake",
         user_id=user_id,
         session_id=session_id,
         user_metadata=user_metadata or {},

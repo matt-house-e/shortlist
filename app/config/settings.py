@@ -58,13 +58,6 @@ class Settings(BaseSettings):
     chainlit_port: int = 8000
 
     # -------------------------------------------------------------------------
-    # Knowledge Base Configuration (Optional)
-    # -------------------------------------------------------------------------
-    openai_vector_store_id: str | None = None
-    kb_search_threshold: float = 0.7
-    kb_max_results: int = 5
-
-    # -------------------------------------------------------------------------
     # Web Search Configuration (OpenAI Responses API)
     # -------------------------------------------------------------------------
     web_search_enabled: bool = False
