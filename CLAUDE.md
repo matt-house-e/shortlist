@@ -1,105 +1,60 @@
-# Agent Template - Claude Code Context
+# Shortlist - Claude Code Context
 
-## Project Overview
+## What This Is
 
-This is a **multi-agent conversational system template** built with:
-- **Chainlit** - Chat interface
-- **LangGraph** - Workflow orchestration
-- **PostgreSQL** - Database
-- **AWS (ECS Fargate)** - Production deployment
+Shortlist is an AI-powered product research system. Users describe what they want to buy, and it builds a curated comparison table through conversation.
 
-## Directory Structure
+- **Chat UI**: Chainlit | **Workflow**: LangGraph | **Database**: PostgreSQL
+- **Three-phase flow**: INTAKE → RESEARCH → ADVISE (with refinement loop)
+
+## Project Layout
 
 ```
-app/                    # Main application code
-├── chat/               # Chainlit handlers
-├── agents/             # LangGraph workflow & nodes
-├── models/             # Pydantic models & state
-├── services/           # External service integrations
-├── config/             # Configuration management
-├── auth/               # Authentication providers
-└── utils/              # Utility functions
-
-infrastructure/         # Terraform IaC
-tests/                  # Test suite
-docs/                   # MkDocs documentation
+app/agents/         # LangGraph workflow & nodes
+app/models/state.py # AgentState (fat state pattern)
+app/services/       # LLM, Lattice, external APIs
+app/chat/           # Chainlit handlers
+app/config/         # Pydantic settings
+infrastructure/     # Terraform (AWS ECS Fargate)
+tests/              # pytest suite
 ```
 
 ## Key Files
 
-- `app/agents/workflow.py` - LangGraph graph definition
+- `app/agents/workflow.py` - Graph definition
 - `app/models/state.py` - Central state schema
-- `app/chat/handlers.py` - Chainlit entry point
-- `app/config/settings.py` - Pydantic settings
+- `app/config/settings.py` - Environment configuration
 
-## Development Commands
+## Development
+
+**Local only** - no cloud deployment yet. Use Docker Compose for all services.
 
 ```bash
-make dev              # Start Chainlit dev server
-make up               # Start Docker services (DB, LocalStack)
-make test             # Run tests
-make check            # Lint & format check
-make db-migrate       # Run migrations
-make docs             # Serve documentation
+make dev      # Start Chainlit dev server
+make up       # Docker services (DB, LocalStack)
+make test     # Run tests
+make check    # Lint & format (ruff)
 ```
 
-## Architecture Patterns
+## Verification
 
-### Fat State Pattern
-All workflow data lives in `AgentState` (app/models/state.py). This simplifies debugging and state inspection.
+Before committing: `make check && make test`
 
-### Node Functions
-Agent logic is pure functions that return `Command` objects for routing:
-```python
-async def agent_node(state: AgentState) -> Command:
-    return Command(update={...}, goto="next_node")
-```
+## Architecture Deep Dives
 
-### Service Layer
-External dependencies are abstracted behind service classes in `app/services/`.
-
-## Testing
-
-- Unit tests: `tests/agents/`, `tests/services/`, `tests/models/`
-- Integration tests: `tests/integration/`
-- Fixtures in `tests/conftest.py`
-
-## Environment
-
-- Python 3.12+
-- PostgreSQL 16
-- LocalStack for S3 emulation (development)
-- Configuration via `.env` file
-
-## Deployment
-
-- Production: AWS ECS Fargate
-- Infrastructure: Terraform modules in `infrastructure/`
-- CI/CD: GitHub Actions in `.github/workflows/`
+| Topic | Reference |
+|-------|-----------|
+| Full template patterns | SPEC.md |
+| State schema & phases | SHORTLIST_SPEC.md |
+| Node function pattern | SPEC.md:299-310 |
+| Adding agent nodes | SPEC.md:458-473 |
+| Adding services | SPEC.md:475-489 |
 
 ## GitHub Workflow
 
-When working on issues, follow the conventions in `.claude/commands/`:
+Use slash commands:
+- `/create_branch <issue>` - Feature branch from main
+- `/create_issue <desc>` - Create labeled issue
+- `/create_pr` - PR with conventional commits
 
-### Branch Naming
-See `.claude/commands/create_branch.md` for full details:
-- `feat/<issue>-<description>` - New features (type:story, type:tool)
-- `fix/<issue>-<description>` - Bug fixes (type:bug)
-- `chore/<issue>-<description>` - Technical tasks (type:task)
-- `spike/<issue>-<description>` - Research (type:spike)
-
-### PR Creation
-See `.claude/commands/create_pr.md` for full details:
-- Always reference the issue number
-- Include a summary and test plan
-- Run `make check` before creating PR
-
-### Issue Creation
-See `.claude/commands/create_issue.md` for templates and labeling conventions.
-
-### Working on Issues
-1. Create feature branch from main
-2. Implement the requirements from the issue
-3. Run `make check` to verify
-4. Create PR linking to the issue
-5. Issues have dependencies - check "Blocked by" in issue body
+Full standards: `docs/development/github-standards.md`
