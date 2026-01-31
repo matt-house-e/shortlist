@@ -128,23 +128,38 @@ async def process_message_with_state(
     """
     from langchain_core.messages import HumanMessage
 
-    # Prepare initial state
-    initial_state = {
-        "messages": [HumanMessage(content=message)],
-        "user_id": user_id,
-        "session_id": session_id,
-        "current_phase": "intake",
-        "current_node": "intake",
-    }
-
     # Configure thread for memory persistence
     config = {"configurable": {"thread_id": session_id}}
 
-    # Run workflow
-    logger.info(f"Processing message for session {session_id}")
-
+    # Check if this is a new session by trying to get the current state
     try:
-        result = await workflow.ainvoke(initial_state, config)
+        current_state = await workflow.aget_state(config)
+        is_new_session = not current_state.values  # Empty state means new session
+    except Exception:
+        is_new_session = True
+
+    # Prepare input - only pass new message, let checkpointer handle rest
+    if is_new_session:
+        # First message: initialize full state
+        input_state = {
+            "messages": [HumanMessage(content=message)],
+            "user_id": user_id,
+            "session_id": session_id,
+            "current_phase": "intake",
+            "current_node": "intake",
+        }
+        logger.info(f"Starting new session {session_id}")
+    else:
+        # Subsequent messages: only pass the new message
+        # The checkpointer will merge this with existing state
+        input_state = {
+            "messages": [HumanMessage(content=message)],
+        }
+        logger.info(f"Continuing session {session_id}")
+
+    # Run workflow
+    try:
+        result = await workflow.ainvoke(input_state, config)
 
         # Extract response from messages
         messages = result.get("messages", [])
