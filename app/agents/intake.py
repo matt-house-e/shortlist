@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import yaml
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
 from app.models.state import AgentState
 from app.services.llm import get_llm_service
@@ -22,91 +23,46 @@ with open(INTAKE_PROMPT_PATH) as f:
 INTAKE_SYSTEM_PROMPT = INTAKE_PROMPTS["system_prompt"]
 
 
-def parse_requirements(content: str, current_requirements: dict | None) -> dict:
-    """
-    Parse requirements from conversation.
+class UserRequirements(BaseModel):
+    """Structured user requirements extracted from conversation."""
 
-    This is a simple heuristic parser. In production, this would use
-    structured output from the LLM (function calling or structured JSON).
-
-    Args:
-        content: LLM response content
-        current_requirements: Existing requirements to update
-
-    Returns:
-        Updated requirements dictionary
-    """
-    requirements = current_requirements or {}
-
-    # Extract budget mentions (simple pattern matching)
-    content_lower = content.lower()
-
-    # Look for budget patterns
-    if "under" in content_lower or "below" in content_lower:
-        # Try to extract number - this is simplified
-        words = content_lower.split()
-        for i, word in enumerate(words):
-            if word in ["under", "below", "max"] and i + 1 < len(words):
-                next_word = words[i + 1].replace("£", "").replace("$", "")
-                try:
-                    requirements["budget_max"] = float(next_word)
-                except ValueError:
-                    pass
-
-    # Look for product type mentions
-    if "kettle" in content_lower:
-        requirements["product_type"] = "electric kettle"
-    elif "laptop" in content_lower:
-        requirements["product_type"] = "laptop"
-    elif "car" in content_lower:
-        requirements["product_type"] = "car"
-
-    # Look for priorities
-    if "build quality" in content_lower or "quality" in content_lower:
-        if "priorities" not in requirements:
-            requirements["priorities"] = []
-        if "build quality" not in requirements["priorities"]:
-            requirements["priorities"].append("build quality")
-
-    if "price" in content_lower or "value" in content_lower or "affordable" in content_lower:
-        if "priorities" not in requirements:
-            requirements["priorities"] = []
-        if "price" not in requirements["priorities"]:
-            requirements["priorities"].append("price")
-
-    return requirements
+    product_type: str | None = Field(
+        None,
+        description="The type/category of product the user wants (e.g., 'electric kettle', 'laptop', 'toaster')",
+    )
+    budget_min: float | None = Field(None, description="Minimum budget in the local currency")
+    budget_max: float | None = Field(None, description="Maximum budget in the local currency")
+    must_haves: list[str] = Field(
+        default_factory=list,
+        description="Non-negotiable features the product must have",
+    )
+    nice_to_haves: list[str] = Field(
+        default_factory=list,
+        description="Preferred features that are flexible",
+    )
+    priorities: list[str] = Field(
+        default_factory=list,
+        description="What to optimize for (e.g., 'build quality', 'price', 'speed')",
+    )
+    constraints: list[str] = Field(
+        default_factory=list,
+        description="What to avoid (e.g., 'no plastic', 'not from X brand')",
+    )
 
 
-def requirements_are_complete(requirements: dict | None) -> bool:
-    """
-    Check if requirements are sufficient to proceed to RESEARCH.
+class IntakeDecision(BaseModel):
+    """Decision about whether to proceed to research or continue gathering requirements."""
 
-    Minimum requirements:
-    1. Product type identified
-    2. At least one constraint (budget, must_have, priority, etc.)
-
-    Args:
-        requirements: Requirements dictionary
-
-    Returns:
-        True if requirements are complete enough to search
-    """
-    if not requirements:
-        return False
-
-    # Must have product type
-    if not requirements.get("product_type"):
-        return False
-
-    # Must have at least one constraint
-    has_budget = requirements.get("budget_min") or requirements.get("budget_max")
-    has_must_haves = bool(requirements.get("must_haves", []))
-    has_priorities = bool(requirements.get("priorities", []))
-    has_constraints = bool(requirements.get("constraints", []))
-
-    has_constraint = has_budget or has_must_haves or has_priorities or has_constraints
-
-    return has_constraint
+    requirements_sufficient: bool = Field(
+        description="True if we have enough information to proceed to product research"
+    )
+    reasoning: str = Field(
+        description="Brief explanation of why requirements are or aren't sufficient"
+    )
+    next_question: str | None = Field(
+        None,
+        description="If requirements insufficient, what question to ask the user next (conversational, not interrogating)",
+    )
 
 
 async def intake_node(state: AgentState) -> Command:
@@ -114,8 +70,8 @@ async def intake_node(state: AgentState) -> Command:
     INTAKE node - Gather user requirements through multi-turn conversation.
 
     This node engages in dialogue to understand what the user wants to buy.
-    It extracts requirements and determines when enough information has been
-    gathered to proceed to the RESEARCH phase.
+    It uses LLM structured output to extract requirements and LLM judgment
+    to determine when enough information has been gathered to proceed to RESEARCH.
 
     Args:
         state: Current workflow state
@@ -131,68 +87,109 @@ async def intake_node(state: AgentState) -> Command:
     try:
         llm_service = get_llm_service()
 
-        # Build context about current requirements
-        requirements_context = ""
+        # Step 1: Extract requirements from conversation using structured output
+        requirements_prompt = """Based on the entire conversation so far, extract the user's product requirements.
+
+Update any previous requirements with new information from the latest messages.
+If something hasn't been mentioned, leave it as None or empty list."""
+
         if current_requirements:
-            requirements_context = f"\n\nCurrent requirements gathered:\n{yaml.dump(current_requirements, default_flow_style=False)}"
+            requirements_prompt += f"\n\nPrevious requirements:\n{yaml.dump(current_requirements, default_flow_style=False)}"
 
-        # Generate response
-        llm_response = await llm_service.generate(
-            messages,
-            system_prompt=INTAKE_SYSTEM_PROMPT + requirements_context,
+        requirements_messages = messages.copy()
+        requirements_messages.append(HumanMessage(content=requirements_prompt))
+
+        extracted_requirements = await llm_service.generate_structured(
+            requirements_messages,
+            schema=UserRequirements,
+            system_prompt=INTAKE_SYSTEM_PROMPT,
         )
 
-        content = llm_response.content
-        content_lower = content.lower()
+        # Convert to dict and merge with current requirements
+        updated_requirements = extracted_requirements.model_dump(exclude_none=True)
 
-        # Parse requirements from response and user messages
-        last_user_message = ""
-        if messages:
-            for msg in reversed(messages):
-                if hasattr(msg, "type") and msg.type == "human":
-                    last_user_message = msg.content
-                    break
+        # Merge lists properly (don't overwrite with empty lists)
+        for key in ["must_haves", "nice_to_haves", "priorities", "constraints"]:
+            if key in current_requirements and current_requirements[key]:
+                if key not in updated_requirements or not updated_requirements[key]:
+                    updated_requirements[key] = current_requirements[key]
 
-        # Update requirements based on conversation
-        updated_requirements = parse_requirements(content, current_requirements)
-        updated_requirements = parse_requirements(last_user_message, updated_requirements)
+        logger.info(f"Extracted requirements: {updated_requirements}")
 
-        # Check if user explicitly requested to search
-        user_wants_to_search = any(
-            phrase in content_lower or phrase in last_user_message.lower()
-            for phrase in [
-                "let's search",
-                "ready to search",
-                "start searching",
-                "search now",
-                "find products",
-                "show me",
-                "let me see",
-            ]
+        # Step 2: Ask LLM to decide if requirements are sufficient
+        decision_prompt = f"""Based on the current requirements, decide if we have enough information to search for products.
+
+Current requirements:
+{yaml.dump(updated_requirements, default_flow_style=False)}
+
+Minimum needed to proceed:
+- Product type identified (what category of thing they want)
+- At least one constraint (budget, must-have feature, or priority)
+
+Consider the conversation flow - if the user seems ready to see results or has answered your clarifying questions, requirements might be sufficient."""
+
+        decision_messages = messages.copy()
+        decision_messages.append(HumanMessage(content=decision_prompt))
+
+        decision = await llm_service.generate_structured(
+            decision_messages,
+            schema=IntakeDecision,
+            system_prompt=INTAKE_SYSTEM_PROMPT,
         )
 
-        # Determine if requirements are ready
-        requirements_ready = requirements_are_complete(updated_requirements) and (
-            user_wants_to_search
-            or "let me find" in content_lower
-            or "i'll search" in content_lower
-        )
+        logger.info(f"Decision: sufficient={decision.requirements_sufficient}, reasoning={decision.reasoning}")
 
-        # Determine next phase
-        if requirements_ready:
+        # Step 3: Generate conversational response
+        if decision.requirements_sufficient:
+            # Ready to search - confirm and transition
+            confirmation_prompt = """The user has provided enough information. Generate a friendly confirmation message that:
+1. Briefly summarizes what they're looking for
+2. Confirms you'll search for products
+3. Is conversational and encouraging (not robotic)
+
+Keep it to 2-3 sentences."""
+
+            confirmation_messages = messages.copy()
+            confirmation_messages.append(HumanMessage(content=confirmation_prompt))
+
+            llm_response = await llm_service.generate(
+                confirmation_messages,
+                system_prompt=INTAKE_SYSTEM_PROMPT,
+            )
+
             next_phase = "research"
             goto = "research"
-            logger.info(f"Requirements ready: {updated_requirements}")
             logger.info("Transitioning to RESEARCH")
         else:
+            # Need more information - ask the next question
+            if decision.next_question:
+                response_content = decision.next_question
+            else:
+                # Fallback: generate a question
+                question_prompt = f"""Generate a friendly follow-up question to gather more requirements.
+
+Current requirements:
+{yaml.dump(updated_requirements, default_flow_style=False)}
+
+Ask about ONE specific thing that would help narrow down the search. Be conversational, not interrogating."""
+
+                question_messages = messages.copy()
+                question_messages.append(HumanMessage(content=question_prompt))
+
+                llm_response = await llm_service.generate(
+                    question_messages,
+                    system_prompt=INTAKE_SYSTEM_PROMPT,
+                )
+                response_content = llm_response.content
+
+            llm_response = type('Response', (), {'content': response_content})()
             next_phase = "intake"
             goto = "__end__"  # Return control to user for next input
-            logger.info(f"Requirements incomplete: {updated_requirements}")
             logger.info("Staying in INTAKE")
 
         return Command(
             update={
-                "messages": [AIMessage(content=content)],
+                "messages": [AIMessage(content=llm_response.content)],
                 "current_node": "intake",
                 "current_phase": next_phase,
                 "user_requirements": updated_requirements,
@@ -200,13 +197,13 @@ async def intake_node(state: AgentState) -> Command:
             goto=goto,
         )
 
-    except Exception as e:
-        logger.error(f"INTAKE error: {e}")
+    except Exception:
+        logger.exception("INTAKE error")
         return Command(
             update={
-                "messages": [AIMessage(content=f"I encountered an error: {str(e)}")],
+                "messages": [AIMessage(content="I encountered an error processing your request.")],
                 "current_node": "intake",
-                "phase": "error",
+                "current_phase": "error",
             },
             goto="__end__",
         )
