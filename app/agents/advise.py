@@ -59,7 +59,7 @@ async def advise_node(state: AgentState) -> Command:
         # Build context about the comparison table
         table_context = ""
         if comparison_table:
-            table_context = f"\n\nComparison table available with {len(comparison_table.get('rows', []))} products."
+            table_context = f"\n\nComparison table available with {len(comparison_table.get('candidates', []))} products."
 
         # Generate response
         llm_response = await llm_service.generate(
@@ -67,16 +67,22 @@ async def advise_node(state: AgentState) -> Command:
             system_prompt=ADVISE_SYSTEM_PROMPT + table_context,
         )
 
-        # TODO: Parse user intent from LLM response
-        # For now, use simple heuristics
-        content = llm_response.content.lower()
+        # Parse user intent from the last user message
+        last_user_message = ""
+        for msg in reversed(messages):
+            if hasattr(msg, "type") and msg.type == "human":
+                last_user_message = msg.content.lower()
+                break
 
-        user_satisfied = any(phrase in content for phrase in ["done", "thank", "goodbye"])
-        wants_more_options = "more options" in content or "find more" in content
-        wants_new_fields = "add field" in content or "compare on" in content
-        requirements_changed = "change requirement" in content or "actually my budget" in content
+        # TODO: Use structured LLM output for intent detection
+        # For now, use simple heuristics on user message
+        user_satisfied = any(phrase in last_user_message for phrase in ["done", "thank", "goodbye"])
+        wants_more_options = "more options" in last_user_message or "find more" in last_user_message
+        wants_new_fields = "add field" in last_user_message or "compare on" in last_user_message
+        requirements_changed = "change requirement" in last_user_message or "actually my budget" in last_user_message
 
         # Determine routing
+        need_new_search_flag = None  # Only set if routing to research
         if user_satisfied:
             logger.info("User satisfied, ending session")
             goto = "__end__"
@@ -89,33 +95,40 @@ async def advise_node(state: AgentState) -> Command:
             logger.info("User wants more options, returning to RESEARCH")
             goto = "research"
             next_phase = "research"
-            state["need_new_search"] = True
+            need_new_search_flag = True
         elif wants_new_fields:
             logger.info("User wants new fields, returning to RESEARCH (Enricher only)")
             goto = "research"
             next_phase = "research"
-            state["need_new_search"] = False
+            need_new_search_flag = False
         else:
             logger.info("Continuing conversation in ADVISE")
             goto = "__end__"  # Return control to user
             next_phase = "advise"
 
+        # Build update dict
+        update_dict = {
+            "messages": [AIMessage(content=llm_response.content)],
+            "current_node": "advise",
+            "current_phase": next_phase,
+        }
+
+        # Add need_new_search flag if routing to research
+        if need_new_search_flag is not None:
+            update_dict["need_new_search"] = need_new_search_flag
+
         return Command(
-            update={
-                "messages": [AIMessage(content=llm_response.content)],
-                "current_node": "advise",
-                "current_phase": next_phase,
-            },
+            update=update_dict,
             goto=goto,
         )
 
-    except Exception as e:
-        logger.error(f"ADVISE error: {e}")
+    except Exception:
+        logger.exception("ADVISE error")
         return Command(
             update={
-                "messages": [AIMessage(content=f"I encountered an error: {str(e)}")],
+                "messages": [AIMessage(content="I encountered an error processing your request.")],
                 "current_node": "advise",
-                "phase": "error",
+                "current_phase": "error",
             },
             goto="__end__",
         )

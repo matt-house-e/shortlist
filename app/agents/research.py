@@ -159,43 +159,117 @@ async def explorer_step(state: AgentState) -> tuple[list[dict], list[dict]]:
     # For now, generate mock candidates
     logger.info("Using mock candidate data (web search not yet integrated)")
 
-    candidates = [
-        {
-            "name": "Fellow Stagg EKG Electric Pour-Over Kettle",
-            "manufacturer": "Fellow",
-            "official_url": "https://fellowproducts.com/products/stagg-ekg-electric-pour-over-kettle",
-            "description": "Electric kettle with variable temperature control",
-            "category": product_type,
-        },
-        {
-            "name": "Bonavita 1.0L Variable Temperature Kettle",
-            "manufacturer": "Bonavita",
-            "official_url": "https://bonavitaworld.com/products/10l-variable-temperature-kettle",
-            "description": "Compact kettle with precise temperature control",
-            "category": product_type,
-        },
-        {
-            "name": "Cuisinart CPK-17 PerfecTemp Kettle",
-            "manufacturer": "Cuisinart",
-            "official_url": "https://www.cuisinart.com/shopping/appliances/kettles/cpk-17",
-            "description": "1.7-liter cordless electric kettle",
-            "category": product_type,
-        },
-        {
-            "name": "Breville BKE820XL Variable-Temperature Kettle",
-            "manufacturer": "Breville",
-            "official_url": "https://www.breville.com/us/en/products/kettles/bke820.html",
-            "description": "Premium kettle with 5 temperature presets",
-            "category": product_type,
-        },
-        {
-            "name": "OXO Brew Adjustable Temperature Kettle",
-            "manufacturer": "OXO",
-            "official_url": "https://www.oxo.com/brew-adjustable-temperature-kettle.html",
-            "description": "Precision pour kettle for coffee and tea",
-            "category": product_type,
-        },
-    ]
+    # Mock candidate data by product type
+    mock_data = {
+        "kettle": [
+            {
+                "name": "Fellow Stagg EKG Electric Pour-Over Kettle",
+                "manufacturer": "Fellow",
+                "official_url": "https://fellowproducts.com/products/stagg-ekg-electric-pour-over-kettle",
+                "description": "Electric kettle with variable temperature control",
+                "category": product_type,
+            },
+            {
+                "name": "Bonavita 1.0L Variable Temperature Kettle",
+                "manufacturer": "Bonavita",
+                "official_url": "https://bonavitaworld.com/products/10l-variable-temperature-kettle",
+                "description": "Compact kettle with precise temperature control",
+                "category": product_type,
+            },
+            {
+                "name": "Cuisinart CPK-17 PerfecTemp Kettle",
+                "manufacturer": "Cuisinart",
+                "official_url": "https://www.cuisinart.com/shopping/appliances/kettles/cpk-17",
+                "description": "1.7-liter cordless electric kettle",
+                "category": product_type,
+            },
+            {
+                "name": "Breville BKE820XL Variable-Temperature Kettle",
+                "manufacturer": "Breville",
+                "official_url": "https://www.breville.com/us/en/products/kettles/bke820.html",
+                "description": "Premium kettle with 5 temperature presets",
+                "category": product_type,
+            },
+            {
+                "name": "OXO Brew Adjustable Temperature Kettle",
+                "manufacturer": "OXO",
+                "official_url": "https://www.oxo.com/brew-adjustable-temperature-kettle.html",
+                "description": "Precision pour kettle for coffee and tea",
+                "category": product_type,
+            },
+        ],
+        "laptop": [
+            {
+                "name": "Dell XPS 13",
+                "manufacturer": "Dell",
+                "official_url": "https://www.dell.com/en-us/shop/dell-laptops/xps-13-laptop/spd/xps-13-9340-laptop",
+                "description": "Compact 13-inch ultrabook with Intel processors",
+                "category": product_type,
+            },
+            {
+                "name": "MacBook Air M3",
+                "manufacturer": "Apple",
+                "official_url": "https://www.apple.com/macbook-air/",
+                "description": "Lightweight laptop with Apple Silicon",
+                "category": product_type,
+            },
+            {
+                "name": "Lenovo ThinkPad X1 Carbon",
+                "manufacturer": "Lenovo",
+                "official_url": "https://www.lenovo.com/us/en/p/laptops/thinkpad/thinkpadx1/thinkpad-x1-carbon-gen-11",
+                "description": "Business laptop with robust build quality",
+                "category": product_type,
+            },
+            {
+                "name": "HP Spectre x360",
+                "manufacturer": "HP",
+                "official_url": "https://www.hp.com/us-en/shop/pdp/hp-spectre-x360-2-in-1-laptop-14",
+                "description": "2-in-1 convertible laptop with touchscreen",
+                "category": product_type,
+            },
+            {
+                "name": "ASUS ZenBook 14",
+                "manufacturer": "ASUS",
+                "official_url": "https://www.asus.com/laptops/for-home/zenbook/zenbook-14-oled-ux3405",
+                "description": "Premium ultrabook with OLED display",
+                "category": product_type,
+            },
+        ],
+    }
+
+    # Select mock data based on product type or use generic fallback
+    candidates = None
+    for key in mock_data:
+        if key in product_type.lower():
+            candidates = mock_data[key]
+            break
+
+    # Fallback to generic product if no match
+    if candidates is None:
+        logger.warning(f"No mock data for product type '{product_type}', using generic fallback")
+        candidates = [
+            {
+                "name": f"Generic {product_type.title()} Option 1",
+                "manufacturer": "Unknown",
+                "official_url": f"https://example.com/product-1",
+                "description": f"A {product_type} product",
+                "category": product_type,
+            },
+            {
+                "name": f"Generic {product_type.title()} Option 2",
+                "manufacturer": "Unknown",
+                "official_url": f"https://example.com/product-2",
+                "description": f"Another {product_type} product",
+                "category": product_type,
+            },
+            {
+                "name": f"Generic {product_type.title()} Option 3",
+                "manufacturer": "Unknown",
+                "official_url": f"https://example.com/product-3",
+                "description": f"Yet another {product_type} product",
+                "category": product_type,
+            },
+        ]
 
     # Generate field definitions
     field_definitions = generate_field_definitions(product_type, requirements)
@@ -282,7 +356,15 @@ async def research_node(state: AgentState) -> Command:
         else:
             logger.info("Skipping Explorer (re-enrichment mode)")
             # Use existing candidates and field definitions
-            field_definitions = state.get("comparison_table", {}).get("fields", [])
+            comparison_table_data = state.get("comparison_table") or {}
+            field_definitions = comparison_table_data.get("fields", [])
+
+            # Defensive fallback if no field definitions exist
+            if not field_definitions:
+                logger.warning("No existing field definitions found, regenerating")
+                requirements = state.get("user_requirements", {})
+                product_type = requirements.get("product_type", "product")
+                field_definitions = generate_field_definitions(product_type, requirements)
 
         # Step 2: Enricher (always)
         logger.info("Running Enricher sub-step")
@@ -306,13 +388,13 @@ async def research_node(state: AgentState) -> Command:
             goto="advise",
         )
 
-    except Exception as e:
-        logger.error(f"RESEARCH error: {e}")
-        error_msg = f"I encountered an issue during research: {str(e)}. Let me still show you what I found."
+    except Exception:
+        logger.exception("RESEARCH error")
+        error_msg = "I encountered an issue during research. Let me still show you what I found."
         return Command(
             update={
                 "current_node": "research",
-                "phase": "error",
+                "current_phase": "error",
                 "messages": [AIMessage(content=error_msg)],
             },
             goto="advise",  # Still proceed to ADVISE with error context

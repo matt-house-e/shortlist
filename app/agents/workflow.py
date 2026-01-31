@@ -133,8 +133,8 @@ async def process_message_with_state(
         "messages": [HumanMessage(content=message)],
         "user_id": user_id,
         "session_id": session_id,
-        "phase": "start",
-        "current_node": "router",
+        "current_phase": "intake",
+        "current_node": "intake",
     }
 
     # Configure thread for memory persistence
