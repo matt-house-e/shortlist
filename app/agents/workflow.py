@@ -3,8 +3,9 @@
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
 
-from app.agents.agent import agent_node
-from app.agents.router import router_node
+from app.agents.advise import advise_node
+from app.agents.intake import intake_node
+from app.agents.research import research_node
 from app.models.state import AgentState
 from app.services.llm import LLMService
 from app.utils.logger import get_logger
@@ -16,10 +17,17 @@ def create_workflow(llm_service: LLMService) -> StateGraph:
     """
     Create and compile the LangGraph workflow.
 
-    The workflow follows this structure:
-    1. Router node - Determines which agent should handle the request
-    2. Agent node(s) - Process the request and generate responses
-    3. End - Complete the workflow
+    The workflow follows Shortlist's 3-phase structure:
+    INTAKE → RESEARCH → ADVISE → END
+
+    With refinement loops:
+    - ADVISE → RESEARCH (more options or new fields)
+    - ADVISE → INTAKE (requirements changed)
+
+    Human-in-the-loop:
+    - INTAKE waits for user input each turn
+    - RESEARCH runs automatically
+    - ADVISE waits for user input each turn
 
     Args:
         llm_service: LLM service instance for model interactions
@@ -33,20 +41,26 @@ def create_workflow(llm_service: LLMService) -> StateGraph:
     # -------------------------------------------------------------------------
     # Add Nodes
     # -------------------------------------------------------------------------
-    graph.add_node("router", router_node)
-    graph.add_node("agent", agent_node)
+    graph.add_node("intake", intake_node)
+    graph.add_node("research", research_node)
+    graph.add_node("advise", advise_node)
 
     # -------------------------------------------------------------------------
-    # Define Edges
+    # Define Entry Point
     # -------------------------------------------------------------------------
-    # Entry point
-    graph.set_entry_point("router")
+    # All conversations start with INTAKE
+    graph.set_entry_point("intake")
 
-    # Router routes to agent (or could route to multiple agents)
-    graph.add_edge("router", "agent")
-
-    # Agent completes the workflow
-    graph.set_finish_point("agent")
+    # -------------------------------------------------------------------------
+    # Edges are handled by Command API in each node
+    # -------------------------------------------------------------------------
+    # The nodes use Command.goto to dynamically route:
+    # - intake → research (when requirements ready)
+    # - intake → __end__ (to wait for more user input)
+    # - research → advise (when table ready)
+    # - advise → __end__ (to wait for user input)
+    # - advise → research (refinement: more options or new fields)
+    # - advise → intake (refinement: requirements changed)
 
     # -------------------------------------------------------------------------
     # Compile with Memory
@@ -54,7 +68,7 @@ def create_workflow(llm_service: LLMService) -> StateGraph:
     memory = MemorySaver()
     compiled = graph.compile(checkpointer=memory)
 
-    logger.info("Workflow created and compiled")
+    logger.info("Shortlist 3-phase workflow created and compiled")
     return compiled
 
 
