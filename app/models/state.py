@@ -107,6 +107,10 @@ class AgentState(TypedDict, total=False):
     new_fields_to_add: list[str]
     current_phase: str  # intake, research, advise
 
+    # Track whether ADVISE has presented results to user
+    # Used to distinguish first entry (present results) vs subsequent (analyze intent)
+    advise_has_presented: bool
+
 
 # =============================================================================
 # State Helpers

@@ -48,8 +48,9 @@ async def advise_node(state: AgentState) -> Command:
     """
     ADVISE node - Present comparison results and handle refinement.
 
-    This node shows recommendations, answers questions, and routes refinement
-    requests to the appropriate phase using LLM-based intent detection.
+    This node has two modes:
+    1. First entry (from RESEARCH): Present results and wait for user input
+    2. Subsequent entries (user sent message): Analyze intent and route
 
     Args:
         state: Current workflow state
@@ -62,6 +63,7 @@ async def advise_node(state: AgentState) -> Command:
     messages = state.get("messages", [])
     comparison_table = state.get("comparison_table")
     requirements = state.get("user_requirements", {})
+    has_presented = state.get("advise_has_presented", False)
 
     try:
         llm_service = get_llm_service()
@@ -89,57 +91,94 @@ async def advise_node(state: AgentState) -> Command:
                 f"\n\nUser Requirements:\n{json.dumps(requirements, indent=2, ensure_ascii=False)}"
             )
 
-        # Generate response with full context
-        llm_response = await llm_service.generate(
-            messages,
-            system_prompt=ADVISE_SYSTEM_PROMPT + table_context + requirements_context,
-        )
+        # -------------------------------------------------------------------
+        # First entry: Present results and wait for user input
+        # -------------------------------------------------------------------
+        if not has_presented:
+            logger.info("ADVISE: First entry - presenting results")
 
-        # Detect user intent using structured output
-        # Only analyze if there's a recent user message (not first turn)
+            # Generate presentation of results
+            llm_response = await llm_service.generate(
+                messages,
+                system_prompt=ADVISE_SYSTEM_PROMPT + table_context + requirements_context,
+            )
+
+            return Command(
+                update={
+                    "messages": [AIMessage(content=llm_response.content)],
+                    "current_node": "advise",
+                    "current_phase": "advise",
+                    "advise_has_presented": True,
+                },
+                goto="__end__",  # Wait for user input
+            )
+
+        # -------------------------------------------------------------------
+        # Subsequent entry: User sent a new message, analyze intent
+        # -------------------------------------------------------------------
+        logger.info("ADVISE: Analyzing user intent")
+
+        # Get the user's latest message
         last_user_message = None
         for msg in reversed(messages):
             if hasattr(msg, "type") and msg.type == "human":
                 last_user_message = msg.content
                 break
 
-        if last_user_message:
-            intent_prompt = f"""Analyze the user's last message to determine their intent.
+        if not last_user_message:
+            # Edge case: no user message found, just respond
+            logger.warning("ADVISE: No user message found, generating response")
+            llm_response = await llm_service.generate(
+                messages,
+                system_prompt=ADVISE_SYSTEM_PROMPT + table_context + requirements_context,
+            )
+            return Command(
+                update={
+                    "messages": [AIMessage(content=llm_response.content)],
+                    "current_node": "advise",
+                    "current_phase": "advise",
+                },
+                goto="__end__",
+            )
+
+        # Detect user intent
+        intent_prompt = f"""Analyze the user's last message to determine their intent.
 
 User's message: "{last_user_message}"
 
-Current phase: We just presented product recommendations and are in the ADVISE phase.
+Current phase: We have presented product recommendations and the user is now responding.
 
 Possible intents:
 - 'satisfied': User is done and happy with results (e.g., "thanks", "I'll go with this", "that's all")
 - 'more_options': User wants to see more products (e.g., "show me more", "any other options?")
 - 'new_fields': User wants to add comparison dimensions (e.g., "can you add energy efficiency?", "compare warranty")
-- 'change_requirements': User wants to modify search criteria (e.g., "actually my budget is £30", "I want a different color")
+- 'change_requirements': User wants to modify search criteria (e.g., "actually my budget is £30", "I want a different brand")
 - 'question': User is asking a follow-up question about current results
 
 What is their primary intent?"""
 
-            intent_messages = messages.copy()
-            intent_messages.append(HumanMessage(content=intent_prompt))
+        intent_messages = messages.copy()
+        intent_messages.append(HumanMessage(content=intent_prompt))
 
-            user_intent = await llm_service.generate_structured(
-                intent_messages,
-                schema=UserIntent,
-                system_prompt=ADVISE_SYSTEM_PROMPT,
-            )
+        user_intent = await llm_service.generate_structured(
+            intent_messages,
+            schema=UserIntent,
+            system_prompt=ADVISE_SYSTEM_PROMPT,
+        )
 
-            logger.info(
-                f"Detected intent: {user_intent.intent_type}, reasoning: {user_intent.reasoning}"
-            )
-        else:
-            # First turn in ADVISE - just presenting results
-            user_intent = UserIntent(
-                intent_type="question",
-                reasoning="First turn in ADVISE, presenting results",
-            )
+        logger.info(
+            f"Detected intent: {user_intent.intent_type}, reasoning: {user_intent.reasoning}"
+        )
+
+        # Generate conversational response
+        llm_response = await llm_service.generate(
+            messages,
+            system_prompt=ADVISE_SYSTEM_PROMPT + table_context + requirements_context,
+        )
 
         # Determine routing based on intent
-        need_new_search_flag = None  # Only set if routing to research
+        need_new_search_flag = None
+        reset_presented_flag = False
 
         if user_intent.intent_type == "satisfied":
             logger.info("User satisfied, ending session")
@@ -149,11 +188,13 @@ What is their primary intent?"""
             logger.info("Requirements changed, returning to INTAKE")
             goto = "intake"
             next_phase = "intake"
+            reset_presented_flag = True
         elif user_intent.intent_type == "more_options":
             logger.info("User wants more options, returning to RESEARCH")
             goto = "research"
             next_phase = "research"
             need_new_search_flag = True
+            reset_presented_flag = True
         elif user_intent.intent_type == "new_fields":
             logger.info(
                 f"User wants new fields: {user_intent.extracted_fields}, returning to RESEARCH (Enricher only)"
@@ -161,9 +202,10 @@ What is their primary intent?"""
             goto = "research"
             next_phase = "research"
             need_new_search_flag = False
+            reset_presented_flag = True
         else:  # question or uncertain
             logger.info("Continuing conversation in ADVISE")
-            goto = "__end__"  # Return control to user
+            goto = "__end__"
             next_phase = "advise"
 
         # Build update dict
@@ -172,6 +214,10 @@ What is their primary intent?"""
             "current_node": "advise",
             "current_phase": next_phase,
         }
+
+        # Reset the presented flag if we're leaving ADVISE
+        if reset_presented_flag:
+            update_dict["advise_has_presented"] = False
 
         # Add need_new_search flag if routing to research
         if need_new_search_flag is not None:

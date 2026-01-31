@@ -115,38 +115,50 @@ Shortlist uses a **state-driven workflow** with three phases. All phases share a
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
-│         ┌──────────┐                                            │
-│    ┌───▶│  INTAKE  │ (conversational, multi-turn)              │
-│    │    └────┬─────┘                                            │
-│    │         │ requirements ready                               │
-│    │         ▼                                                  │
-│    │    ┌──────────┐                                            │
-│    │    │ RESEARCH │ (automated)                                │
-│    │    │          │                                            │
-│    │    │ Explorer ───▶ web search ───▶ candidates             │
-│    │    │    │                                                  │
-│    │    │    ▼                                                  │
-│    │    │ Enricher ───▶ Lattice ───▶ comparison table          │
-│    │    └────┬─────┘                                            │
-│    │         │ table ready                                      │
-│    │         ▼                                                  │
-│    │    ┌──────────┐                                            │
-│    │    │  ADVISE  │ (conversational, multi-turn)              │
-│    │    └────┬─────┘                                            │
-│    │         │                                                  │
-│    │    ┌────┴────┬─────────────┬──────────────┐               │
-│    │    │         │             │              │               │
-│    │    ▼         ▼             ▼              ▼               │
-│    │  END    new fields    more options    new requirements    │
-│    │         (Enricher     (full Research)  (back to Intake)   │
-│    │          only)                                             │
-│    │              │             │              │               │
-│    │              └─────────────┴──────────────┘               │
-│    │                            │                               │
-│    └────────────────────────────┘                               │
+│    User message                                                 │
+│         │                                                       │
+│         ▼                                                       │
+│    ┌──────────┐                                                 │
+│    │  ROUTER  │ (checks current_phase)                         │
+│    └────┬─────┘                                                 │
+│         │                                                       │
+│    ┌────┴────────────────────────┐                              │
+│    │                             │                              │
+│    ▼                             ▼                              │
+│    ┌──────────┐            ┌──────────┐                         │
+│    │  INTAKE  │            │  ADVISE  │ ◄───────────────────┐   │
+│    └────┬─────┘            └────┬─────┘                     │   │
+│         │ requirements          │                           │   │
+│         │ ready                 │ user intent               │   │
+│         ▼                       ▼                           │   │
+│    ┌──────────┐           ┌────┴────┬───────────┐           │   │
+│    │ RESEARCH │           │         │           │           │   │
+│    │          │           ▼         ▼           ▼           │   │
+│    │ Explorer │         END    new fields   more options    │   │
+│    │    │     │                     │           │           │   │
+│    │    ▼     │                     └─────┬─────┘           │   │
+│    │ Enricher │                           │                 │   │
+│    └────┬─────┘                           ▼                 │   │
+│         │                           ┌──────────┐            │   │
+│         │ table ready               │ RESEARCH │────────────┘   │
+│         └──────────────────────────▶└──────────┘                │
+│                                                                 │
+│    (change_requirements loops back via ROUTER → INTAKE)         │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+#### The Router Pattern
+
+The **router node** is the entry point for all incoming user messages. It checks `current_phase` and directs the message to the appropriate node:
+
+| current_phase | Routes to | Rationale |
+|---------------|-----------|-----------|
+| `intake` (or unset) | INTAKE | Gathering requirements |
+| `advise` | ADVISE | User responding to recommendations |
+| `research` | ADVISE | Edge case: user shouldn't message during research |
+
+This pattern enables proper human-in-the-loop behavior where both INTAKE and ADVISE can receive and process user messages independently, rather than all messages flowing through INTAKE first.
 
 ### Phase Summary
 
@@ -300,6 +312,12 @@ All phases read from and write to a single shared state. There is no isolated me
 | ADVISE | Waits for user input each turn |
 
 The system presents results and waits for user direction. It does not proceed to a new search without user confirmation.
+
+**Implementation:** The router pattern ensures messages reach the correct phase. When a user sends a message:
+1. Router checks `current_phase`
+2. Message is directed to INTAKE or ADVISE accordingly
+3. The receiving node processes the message and may transition phases
+4. Control returns to user (via `__end__`) when waiting for input
 
 ---
 
@@ -558,11 +576,18 @@ ALWAYS:
 
 #### Behavior
 
+ADVISE operates in two modes:
+
+**Mode 1: Present Results (first entry from RESEARCH)**
 1. Analyze comparison table against user requirements
 2. Rank candidates based on user priorities
 3. Present top 5 with trade-off explanations
-4. Wait for user response
-5. Interpret user intent and route accordingly
+4. Return control to user and wait for response
+
+**Mode 2: Handle Response (user sent a new message)**
+1. Interpret user intent from their message
+2. Generate conversational response
+3. Route to appropriate phase based on intent
 
 **Presentation format:**
 - Show top 5 in table format
@@ -716,10 +741,11 @@ Flags that control routing and behavior.
 
 | Concept | Intent |
 |---------|--------|
-| Current phase | Where we are in the workflow |
+| Current phase | Where we are in the workflow (intake, research, advise) |
 | Need new search | Whether Explorer should run |
 | New fields to add | Fields requested during refinement |
 | Error state | If something failed, what and why |
+| Advise has presented | Whether ADVISE has shown results to user (for mode switching) |
 
 ---
 

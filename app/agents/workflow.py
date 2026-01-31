@@ -2,6 +2,7 @@
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
+from langgraph.types import Command
 
 from app.agents.advise import advise_node
 from app.agents.intake import intake_node
@@ -11,6 +12,42 @@ from app.services.llm import LLMService
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+async def router_node(state: AgentState) -> Command:
+    """
+    Route incoming messages to the correct phase node.
+
+    This router enables proper human-in-the-loop behavior by ensuring messages
+    go to the node that should handle them based on current_phase, rather than
+    always starting at INTAKE.
+
+    Routing logic:
+    - phase == "intake" or unset → intake node
+    - phase == "advise" → advise node
+    - phase == "research" → research node (edge case, shouldn't receive messages)
+
+    Args:
+        state: Current workflow state
+
+    Returns:
+        Command routing to the appropriate node
+    """
+    current_phase = state.get("current_phase", "intake")
+    logger.info(f"Router: current_phase={current_phase}")
+
+    if current_phase == "advise":
+        logger.info("Router: directing to ADVISE")
+        return Command(goto="advise")
+    elif current_phase == "research":
+        # Edge case: user shouldn't send messages during research
+        # but if they do, route to advise to handle it
+        logger.info("Router: research phase, directing to ADVISE")
+        return Command(goto="advise")
+    else:
+        # Default to intake for "intake" phase or any other state
+        logger.info("Router: directing to INTAKE")
+        return Command(goto="intake")
 
 
 def create_workflow(llm_service: LLMService) -> StateGraph:
@@ -41,6 +78,7 @@ def create_workflow(llm_service: LLMService) -> StateGraph:
     # -------------------------------------------------------------------------
     # Add Nodes
     # -------------------------------------------------------------------------
+    graph.add_node("router", router_node)
     graph.add_node("intake", intake_node)
     graph.add_node("research", research_node)
     graph.add_node("advise", advise_node)
@@ -48,13 +86,19 @@ def create_workflow(llm_service: LLMService) -> StateGraph:
     # -------------------------------------------------------------------------
     # Define Entry Point
     # -------------------------------------------------------------------------
-    # All conversations start with INTAKE
-    graph.set_entry_point("intake")
+    # All messages enter through the router, which directs to the correct
+    # phase node based on current_phase. This enables proper human-in-the-loop
+    # behavior where both INTAKE and ADVISE can receive user messages.
+    graph.set_entry_point("router")
 
     # -------------------------------------------------------------------------
     # Edges are handled by Command API in each node
     # -------------------------------------------------------------------------
-    # The nodes use Command.goto to dynamically route:
+    # The router directs messages to the correct phase:
+    # - router → intake (when phase == "intake")
+    # - router → advise (when phase == "advise")
+    #
+    # Nodes use Command.goto for transitions:
     # - intake → research (when requirements ready)
     # - intake → __end__ (to wait for more user input)
     # - research → advise (when table ready)

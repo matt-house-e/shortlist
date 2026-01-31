@@ -384,6 +384,7 @@ async def research_node(state: AgentState) -> Command:
                 "candidates": candidates,
                 "comparison_table": comparison_table,
                 "need_new_search": False,
+                "advise_has_presented": False,  # Reset so ADVISE presents results
                 "messages": [AIMessage(content=response_msg)],
             },
             goto="advise",
