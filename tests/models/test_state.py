@@ -45,3 +45,17 @@ def test_create_initial_state_has_hitl_fields():
     assert state["pending_field_definitions"] is None
     assert state["pending_intent"] is None
     assert state["pending_intent_details"] is None
+
+
+def test_create_initial_state_has_living_table_fields():
+    """Test initial state includes living table and requested_fields."""
+    state = create_initial_state(
+        user_id="test-user",
+        session_id="test-session",
+    )
+
+    # Living table should be None initially
+    assert state["living_table"] is None
+
+    # Requested fields should be empty list
+    assert state["requested_fields"] == []

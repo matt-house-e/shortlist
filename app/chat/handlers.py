@@ -1,6 +1,7 @@
 """Chainlit event handlers - Main entry point for the chat interface."""
 
 import uuid
+from datetime import datetime
 
 import chainlit as cl
 from chainlit.data.chainlit_data_layer import ChainlitDataLayer
@@ -12,6 +13,7 @@ from app.agents.workflow import (
 )
 from app.auth.password_auth import password_auth_callback
 from app.config import get_settings
+from app.models.schemas.shortlist import ComparisonTable
 from app.services.llm import LLMService
 from app.utils.logger import get_logger, setup_logging
 from app.utils.sanitization import sanitize_input
@@ -166,6 +168,141 @@ def format_response_with_citations(content: str, citations: list[dict]) -> str:
 
 
 # =============================================================================
+# Table Rendering and Export
+# =============================================================================
+
+
+def render_table_markdown(living_table_data: dict | None, max_rows: int = 10) -> str | None:
+    """
+    Render the living table as markdown for display in chat.
+
+    Args:
+        living_table_data: Serialized ComparisonTable dict
+        max_rows: Maximum number of rows to display
+
+    Returns:
+        Markdown table string, or None if no table data
+    """
+    if not living_table_data:
+        return None
+
+    try:
+        table = ComparisonTable.model_validate(living_table_data)
+        if not table.rows:
+            return None
+
+        return table.to_markdown(max_rows=max_rows, show_pending=True)
+    except Exception as e:
+        logger.warning(f"Failed to render table: {e}")
+        return None
+
+
+async def send_table_with_export(
+    living_table_data: dict | None,
+    agent_name: str,
+    include_export_button: bool = True,
+) -> None:
+    """
+    Send the comparison table as a message with an optional export button.
+
+    Args:
+        living_table_data: Serialized ComparisonTable dict
+        agent_name: The display name of the agent
+        include_export_button: Whether to include an "Export CSV" button
+    """
+    if not living_table_data:
+        return
+
+    table_markdown = render_table_markdown(living_table_data)
+    if not table_markdown:
+        return
+
+    # Build message with table
+    message_content = f"## Comparison Table\n\n{table_markdown}"
+
+    if include_export_button:
+        # Create export action button
+        export_action = cl.Action(
+            name="export_csv",
+            label="Export CSV",
+            payload={"action": "export_csv"},
+        )
+        await cl.Message(
+            content=message_content,
+            actions=[export_action],
+            author=agent_name,
+        ).send()
+    else:
+        await cl.Message(content=message_content, author=agent_name).send()
+
+
+@cl.action_callback("export_csv")
+async def on_export_csv(action: cl.Action):
+    """Handle CSV export button click."""
+    logger.info("Export CSV action clicked")
+
+    # Get living table from session state
+    workflow = cl.user_session.get("workflow")
+    if not workflow:
+        await cl.Message(content="Session error. Please refresh the page.").send()
+        return
+
+    # Get the current state from the workflow
+    session_id = cl.user_session.get("id", "unknown")
+    config = {"configurable": {"thread_id": session_id}}
+
+    try:
+        current_state = await workflow.aget_state(config)
+        living_table_data = (
+            current_state.values.get("living_table") if current_state.values else None
+        )
+
+        if not living_table_data:
+            await cl.Message(
+                content="No comparison table available to export.",
+                author="System",
+            ).send()
+            return
+
+        # Convert to ComparisonTable and export
+        table = ComparisonTable.model_validate(living_table_data)
+        csv_content = table.to_csv(exclude_internal=True)
+
+        if not csv_content:
+            await cl.Message(
+                content="The comparison table is empty.",
+                author="System",
+            ).send()
+            return
+
+        # Create CSV file element
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"comparison_table_{timestamp}.csv"
+
+        # Send as file attachment
+        elements = [
+            cl.File(
+                name=filename,
+                content=csv_content.encode("utf-8"),
+                display="inline",
+            )
+        ]
+
+        await cl.Message(
+            content=f"Here's your comparison table export ({table.get_row_count()} products):",
+            elements=elements,
+            author="System",
+        ).send()
+
+    except Exception as e:
+        logger.exception(f"Failed to export CSV: {e}")
+        await cl.Message(
+            content="Failed to export the comparison table. Please try again.",
+            author="System",
+        ).send()
+
+
+# =============================================================================
 # Data Layer
 # =============================================================================
 
@@ -301,6 +438,14 @@ async def on_hitl_action(action: cl.Action):
     else:
         await cl.Message(content=response_content, author=agent_name).send()
 
+    # Render comparison table when entering ADVISE phase with data
+    if current_phase == "advise" and result.living_table:
+        await send_table_with_export(
+            result.living_table,
+            agent_name,
+            include_export_button=True,
+        )
+
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -359,6 +504,14 @@ async def on_message(message: cl.Message):
         await render_action_buttons(result, response_content, agent_name)
     else:
         await cl.Message(content=response_content, author=agent_name).send()
+
+    # Render comparison table when entering ADVISE phase with data
+    if current_phase == "advise" and result.living_table:
+        await send_table_with_export(
+            result.living_table,
+            agent_name,
+            include_export_button=True,
+        )
 
 
 @cl.on_chat_end

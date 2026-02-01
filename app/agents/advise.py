@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
+from app.models.schemas.shortlist import ComparisonTable
 from app.models.state import AgentState
 from app.services.llm import get_llm_service
 from app.utils.logger import get_logger
@@ -249,9 +250,47 @@ async def advise_node(state: AgentState) -> Command:
     try:
         llm_service = get_llm_service()
 
-        # Build context with actual comparison data (not just count)
+        # Build context with actual comparison data
+        # Prefer living_table if available, fall back to legacy comparison_table
         table_context = ""
-        if comparison_table and comparison_table.get("candidates"):
+        living_table_data = state.get("living_table")
+
+        if living_table_data:
+            # Use the new living table format
+            living_table = ComparisonTable.model_validate(living_table_data)
+            field_names = living_table.get_field_names(exclude_internal=True)
+
+            # Build top candidates data from living table
+            top_candidates = []
+            for i, row in enumerate(living_table.rows.values()):
+                if i >= 5:
+                    break
+                candidate_data = {
+                    "name": row.candidate.name,
+                    "manufacturer": row.candidate.manufacturer,
+                }
+                # Add enriched field values
+                for field_name in field_names:
+                    cell = row.cells.get(field_name)
+                    if cell and cell.value is not None:
+                        candidate_data[field_name] = cell.value
+                top_candidates.append(candidate_data)
+
+            table_data = {
+                "total_candidates": living_table.get_row_count(),
+                "qualified_candidates": len(living_table.get_qualified_rows()),
+                "fields": field_names,
+                "top_5_products": top_candidates,
+            }
+
+            table_context = f"\n\nComparison Table Data:\n{json.dumps(table_data, indent=2, ensure_ascii=False)}"
+
+            # Also include markdown table for easy reference
+            markdown_table = living_table.to_markdown(max_rows=5)
+            table_context += f"\n\nTable Preview:\n{markdown_table}"
+
+        elif comparison_table and comparison_table.get("candidates"):
+            # Fall back to legacy comparison_table
             candidates = comparison_table.get("candidates", [])
             fields = comparison_table.get("fields", [])
 

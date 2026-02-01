@@ -179,6 +179,8 @@ class WorkflowResult:
         awaiting_intent_confirmation: bool = False,
         # Phase tracking
         current_phase: str = "intake",
+        # Living table data for UI rendering
+        living_table: dict | None = None,
     ):
         self.content = content
         self.citations = citations or []
@@ -190,6 +192,8 @@ class WorkflowResult:
         self.awaiting_intent_confirmation = awaiting_intent_confirmation
         # Phase tracking
         self.current_phase = current_phase
+        # Living table data
+        self.living_table = living_table
 
 
 async def process_message(
@@ -287,6 +291,9 @@ async def process_message_with_state(
         # Extract current phase
         current_phase = result.get("current_phase", "intake")
 
+        # Extract living table data
+        living_table = result.get("living_table")
+
         return WorkflowResult(
             content=content,
             citations=citations,
@@ -296,6 +303,7 @@ async def process_message_with_state(
             awaiting_fields_confirmation=awaiting_fields,
             awaiting_intent_confirmation=awaiting_intent,
             current_phase=current_phase,
+            living_table=living_table,
         )
 
     except Exception as e:

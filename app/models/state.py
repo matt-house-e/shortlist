@@ -93,10 +93,15 @@ class AgentState(TypedDict, total=False):
     # User requirements for product search
     user_requirements: dict[str, Any] | None
 
-    # Product candidates
+    # Product candidates (raw list from explorer, before enrichment)
     candidates: list[dict[str, Any]]
 
-    # Comparison table with enriched candidate data
+    # Living comparison table - single source of truth for product data
+    # This is a serialized ComparisonTable Pydantic model
+    living_table: dict[str, Any] | None
+
+    # DEPRECATED: Legacy comparison table, kept for migration
+    # Use living_table instead
     comparison_table: dict[str, Any] | None
 
     # Refinement history
@@ -106,6 +111,10 @@ class AgentState(TypedDict, total=False):
     need_new_search: bool
     new_fields_to_add: list[str]
     current_phase: str  # intake, research, advise
+
+    # Fields requested by user via ADVISE (for incremental field addition)
+    # RESEARCH reads this to add only new fields without regenerating everything
+    requested_fields: list[str]
 
     # Track whether ADVISE has presented results to user
     # Used to distinguish first entry (present results) vs subsequent (analyze intent)
@@ -175,10 +184,12 @@ def create_initial_state(
         # Shortlist-specific fields
         user_requirements=None,
         candidates=[],
-        comparison_table=None,
+        living_table=None,
+        comparison_table=None,  # DEPRECATED: kept for migration
         refinement_history=[],
         need_new_search=False,
         new_fields_to_add=[],
+        requested_fields=[],
         current_phase="intake",
         # HITL fields
         awaiting_requirements_confirmation=False,
