@@ -193,12 +193,11 @@ CRITICAL INSTRUCTIONS:
 1. Search the web for the product and extract EXACT values from the search results
 2. For URLs: ONLY use URLs that appear in the citations/sources - NEVER generate or guess URLs
 3. For prices: include currency symbol (e.g., "$29.99", "£49.99")
-4. For ratings: include scale (e.g., "4.5/5", "8.5/10")
-5. For boolean fields: return true or false
-6. For missing data: return null
+4. For boolean fields: return true or false
+5. For missing data: return null
 
 Return ONLY a valid JSON object with field names as keys. Example:
-{{"name": "Product Name", "price": "$99.99", "rating": "4.5/5", "official_url": null}}"""
+{{"name": "Product Name", "price": "$99.99", "official_url": null}}"""
 
     def _build_reasoning_system_prompt(self, fields: dict[str, Any]) -> str:
         """
@@ -241,12 +240,11 @@ CRITICAL URL RULES:
 DATA EXTRACTION RULES:
 1. Extract EXACT values from the pages you visit
 2. For prices: include currency symbol (e.g., "$29.99", "£49.99")
-3. For ratings: include scale (e.g., "4.5/5", "8.5/10")
-4. For boolean fields: return true or false
-5. For missing data: return null
+3. For boolean fields: return true or false
+4. For missing data: return null
 
 Return ONLY a valid JSON object with field names as keys. Example:
-{{"name": "Product Name", "price": "$99.99", "rating": "4.5/5", "official_url": "https://manufacturer.com/product"}}"""
+{{"name": "Product Name", "price": "$99.99", "official_url": "https://manufacturer.com/product"}}"""
 
     def _build_user_prompt(self, row_data: dict[str, Any]) -> str:
         """
