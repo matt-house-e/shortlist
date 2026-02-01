@@ -15,7 +15,7 @@ from app.agents.workflow import (
 from app.auth.password_auth import password_auth_callback
 from app.config import get_settings
 from app.models.schemas.shortlist import ComparisonTable
-from app.services.llm import LLMService
+from app.services.llm import LLMService, get_llm_service
 from app.services.table_rendering import prepare_product_table_props
 from app.utils.logger import get_logger, setup_logging
 from app.utils.sanitization import sanitize_input
@@ -488,7 +488,7 @@ async def on_chat_start():
     logger.info("Starting new chat session")
 
     # Initialize services
-    llm_service = LLMService(settings)
+    llm_service = get_llm_service()
 
     # Create workflow graph
     workflow = create_workflow(llm_service)
@@ -541,8 +541,8 @@ async def on_hitl_action(action: cl.Action):
         if current_state.values:
             requirements = current_state.values.get("user_requirements") or {}
             product_name = requirements.get("product_type") or "product"
-    except Exception:
-        pass  # Fall back to default
+    except Exception as e:
+        logger.warning(f"Failed to retrieve state for product name: {e}")
 
     # Process through workflow with loading indicator (only for slow operations)
     if checkpoint == "requirements":
@@ -602,8 +602,8 @@ async def on_hitl_action(action: cl.Action):
             current_state = await workflow.aget_state(config)
             if current_state.values:
                 user_requirements = current_state.values.get("user_requirements")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to retrieve user requirements for table: {e}")
         await send_product_table(
             living_table_data=result.living_table,
             user_requirements=user_requirements,
@@ -693,8 +693,8 @@ async def on_message(message: cl.Message):
             current_state = await workflow.aget_state(config)
             if current_state.values:
                 user_requirements = current_state.values.get("user_requirements")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to retrieve user requirements for export: {e}")
         await send_product_table(
             living_table_data=result.living_table,
             user_requirements=user_requirements,

@@ -32,8 +32,8 @@ def parse_hitl_message(content: str) -> tuple[str, str] | None:
         parts = inner.split(":", 1)
         if len(parts) == 2:
             return parts[0], parts[1]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to parse HITL message: {e}")
     return None
 
 

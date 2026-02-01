@@ -1,5 +1,9 @@
 """HITL (Human-in-the-Loop) utilities shared across agent nodes."""
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def parse_hitl_choice(content: str) -> str | None:
     """Extract choice from HITL synthetic message.
@@ -17,8 +21,8 @@ def parse_hitl_choice(content: str) -> str | None:
         parts = inner.split(":", 1)
         if len(parts) == 2:
             return parts[1]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to parse HITL message: {e}")
     return None
 
 

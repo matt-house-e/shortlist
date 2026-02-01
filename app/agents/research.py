@@ -11,10 +11,9 @@ from app.agents.research_table import (
     build_field_definitions_list,
     get_or_create_living_table,
 )
-from app.config.settings import get_settings
 from app.models.schemas.shortlist import CellStatus, FieldDefinition
 from app.models.state import AgentState
-from app.services.llm import LLMService
+from app.services.llm import get_llm_service
 from app.utils.hitl import clear_hitl_flags, parse_hitl_choice
 from app.utils.logger import get_logger
 
@@ -410,8 +409,7 @@ async def research_node(state: AgentState) -> Command:
                 logger.warning("No existing field definitions found, regenerating")
                 requirements = state.get("user_requirements", {})
                 product_type = requirements.get("product_type", "product")
-                settings = get_settings()
-                llm_service = LLMService(settings)
+                llm_service = get_llm_service()
                 field_definitions = await generate_field_definitions(
                     product_type, requirements, llm_service
                 )

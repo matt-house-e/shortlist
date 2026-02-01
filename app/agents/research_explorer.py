@@ -5,15 +5,15 @@ import json
 from pathlib import Path
 
 import yaml
-from langchain_core.messages import HumanMessage
 
 from app.config.settings import get_settings
 from app.models.schemas.shortlist import SearchQuery, SearchQueryPlan
 from app.models.state import AgentState
 from app.services.field_generation import get_field_generation_service
-from app.services.llm import LLMService
+from app.services.llm import LLMService, get_llm_service
 from app.services.search_strategy import get_search_strategy_service
 from app.utils.logger import get_logger
+from app.utils.retry import web_search_retry
 
 logger = get_logger(__name__)
 
@@ -346,6 +346,18 @@ def deduplicate_candidates(candidates: list[dict]) -> list[dict]:
     return deduped
 
 
+@web_search_retry
+async def _execute_web_search(llm_service: LLMService, query: str) -> tuple:
+    """Execute a single web search with retry logic for transient failures."""
+    from langchain_core.messages import HumanMessage
+
+    response = await llm_service.generate_with_web_search(
+        messages=[HumanMessage(content=query)],
+        system_prompt=SEARCH_SYSTEM_PROMPT,
+    )
+    return response.content, response.citations
+
+
 async def execute_parallel_searches(
     queries: list[SearchQuery],
     llm_service: LLMService,
@@ -372,13 +384,11 @@ async def execute_parallel_searches(
         try:
             logger.debug(f"[{index}] Starting search: {query.query}")
 
-            response = await llm_service.generate_with_web_search(
-                messages=[HumanMessage(content=query.query)],
-                system_prompt=SEARCH_SYSTEM_PROMPT,
-            )
+            # Use retryable helper for web search
+            content, citations = await _execute_web_search(llm_service, query.query)
 
             # Pass citations to extract real URLs instead of hallucinated ones
-            candidates = extract_candidates_from_response(response.content, response.citations)
+            candidates = extract_candidates_from_response(content, citations)
 
             # Log with angle and count
             logger.info(
@@ -544,8 +554,7 @@ async def explorer_step(state: AgentState) -> tuple[list[dict], list[dict]]:
     logger.info(f"Budget: {requirements.get('budget_max', 'No limit')}")
     logger.info(f"Must-haves: {requirements.get('must_haves', [])}")
 
-    settings = get_settings()
-    llm_service = LLMService(settings)
+    llm_service = get_llm_service()
 
     # Phase 1: Generate diverse search queries using SearchStrategyService
     logger.info("-" * 40)

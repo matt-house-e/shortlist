@@ -15,6 +15,7 @@ from openai import AsyncOpenAI
 
 from app.config.settings import get_settings
 from app.utils.logger import get_logger
+from app.utils.retry import openai_retry
 
 logger = get_logger(__name__)
 
@@ -486,6 +487,11 @@ Return ONLY the JSON object with the extracted values."""
                 return url
         return None
 
+    @openai_retry
+    async def _call_responses_api(self, request_kwargs: dict[str, Any]):
+        """Call OpenAI Responses API with retry logic for transient failures."""
+        return await self.client.responses.create(**request_kwargs)
+
     async def ainvoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """
         Asynchronously process a row with web search enrichment.
@@ -527,8 +533,8 @@ Return ONLY the JSON object with the extracted values."""
             else:
                 request_kwargs["temperature"] = self.temperature
 
-            # Call OpenAI Responses API with web search
-            response = await self.client.responses.create(**request_kwargs)
+            # Call OpenAI Responses API with web search (with retry for transient failures)
+            response = await self._call_responses_api(request_kwargs)
 
             # Extract content and citations
             content = ""

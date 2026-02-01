@@ -1,7 +1,7 @@
 """Enricher sub-step - Build comparison table via Lattice enrichment."""
 
 from app.models.schemas.shortlist import CellStatus, ComparisonTable
-from app.services.lattice import LatticeService
+from app.services.lattice import get_lattice_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -42,8 +42,8 @@ async def enricher_step(
     """
     logger.info(f"Enricher: Starting enrichment for {len(candidates)} candidates")
 
-    # Initialize Lattice service
-    lattice_service = LatticeService()
+    # Get cached Lattice service
+    lattice_service = get_lattice_service()
 
     # Prepare field definitions for Lattice
     lattice_fields = lattice_service.prepare_field_definitions(field_definitions)
@@ -160,8 +160,8 @@ async def enrich_living_table(table: ComparisonTable) -> ComparisonTable:
         logger.warning("No field definitions for pending fields")
         return table
 
-    # Initialize Lattice service and enrich
-    lattice_service = LatticeService()
+    # Get cached Lattice service
+    lattice_service = get_lattice_service()
     lattice_fields = lattice_service.prepare_field_definitions(field_definitions)
 
     results = await lattice_service.enrich_candidates(candidates_for_lattice, lattice_fields)

@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from app.config import Settings, get_settings
 from app.utils.logger import get_logger
+from app.utils.retry import openai_retry
 
 logger = get_logger(__name__)
 
@@ -287,7 +288,7 @@ class LLMService:
             if previous_response_id:
                 request_kwargs["previous_response_id"] = previous_response_id
 
-            response = await client.responses.create(**request_kwargs)
+            response = await self._call_openai_responses_api(client, request_kwargs)
 
             response_time = time.perf_counter() - start_time
 
@@ -351,6 +352,11 @@ class LLMService:
         except Exception as e:
             logger.error(f"Web search generation error: {e}")
             raise
+
+    @openai_retry
+    async def _call_openai_responses_api(self, client, request_kwargs: dict):
+        """Call OpenAI Responses API with retry logic for transient failures."""
+        return await client.responses.create(**request_kwargs)
 
 
 class MockLLMClient:
