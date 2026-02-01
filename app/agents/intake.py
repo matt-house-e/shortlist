@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.models.state import AgentState
 from app.services.llm import get_intake_chat_llm_service, get_intake_llm_service
+from app.utils.hitl import clear_hitl_flags, parse_hitl_choice
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -122,42 +123,6 @@ def format_requirements_summary(requirements: dict) -> str:
     return "\n".join(parts) if parts else "No specific requirements captured."
 
 
-def parse_hitl_choice(content: str) -> str | None:
-    """
-    Parse the choice from a HITL message.
-
-    Args:
-        content: Message content like "[HITL:requirements:Search Now]"
-
-    Returns:
-        The choice string or None if invalid
-    """
-    if not content.startswith("[HITL:"):
-        return None
-    try:
-        inner = content[6:-1]  # Remove [HITL: and ]
-        parts = inner.split(":", 1)
-        if len(parts) == 2:
-            return parts[1]
-    except Exception:
-        pass
-    return None
-
-
-def _clear_hitl_flags() -> dict:
-    """Return a dict of cleared HITL flags for state updates."""
-    return {
-        "awaiting_requirements_confirmation": False,
-        "awaiting_fields_confirmation": False,
-        "awaiting_intent_confirmation": False,
-        "action_choices": None,
-        "pending_requirements_summary": None,
-        "pending_field_definitions": None,
-        "pending_intent": None,
-        "pending_intent_details": None,
-    }
-
-
 async def intake_node(state: AgentState) -> Command:
     """
     INTAKE node - Gather user requirements through multi-turn conversation.
@@ -199,7 +164,7 @@ async def intake_node(state: AgentState) -> Command:
                         "current_node": "intake",
                         "current_phase": "research",
                         "user_requirements": current_requirements,
-                        **_clear_hitl_flags(),
+                        **clear_hitl_flags(),
                     },
                     goto="research",
                 )
@@ -215,7 +180,7 @@ async def intake_node(state: AgentState) -> Command:
                         ],
                         "current_node": "intake",
                         "current_phase": "intake",
-                        **_clear_hitl_flags(),
+                        **clear_hitl_flags(),
                     },
                     goto="__end__",
                 )
@@ -295,7 +260,7 @@ Be a knowledgeable consultant—proactively helpful, not just reactive. Don't as
                     "current_node": "intake",
                     "current_phase": "research",
                     "user_requirements": updated_requirements,
-                    **_clear_hitl_flags(),
+                    **clear_hitl_flags(),
                 },
                 goto="research",
             )
