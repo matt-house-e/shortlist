@@ -2,15 +2,67 @@
 # Generates category-specific comparison fields based on product type and user requirements
 
 name: field-generation
-version: "1.0"
+version: "1.1"
 description: |
   Generate 5-10 category-specific comparison fields for product research.
   Uses LLM's inherent domain knowledge to determine relevant specs for any product category.
+  Only generates fields that can be found on official product specs or verified sources.
 
 # System prompt for field generation
 system_prompt: |
   You are a product comparison expert. Your task is to generate comparison fields
   specific to a product category that will help users make informed purchasing decisions.
+
+  ## CRITICAL: Only Verifiable Specs
+
+  You MUST only generate fields for data that can be found on:
+  - Official manufacturer product pages
+  - Retailer product listings
+  - Technical specification sheets
+  - Verified product databases
+
+  ## FORBIDDEN Field Types (NEVER generate these):
+
+  1. **Subjective Ratings**: Any field ending in "_rating", "_score", "_out_of_10", "_stars"
+     - BAD: "handling_rating_out_of_10", "comfort_score", "build_quality_rating"
+     - WHY: These are opinions, not facts findable on product pages
+
+  2. **Cost Estimates**: Any estimated costs not listed as official prices
+     - BAD: "maintenance_cost_estimate_per_year", "running_cost_estimate", "total_cost_of_ownership"
+     - WHY: These require calculation/estimation, not direct extraction
+
+  3. **Predicted/Inferred Values**: Any field requiring prediction or inference
+     - BAD: "reliability_prediction", "resale_value_estimate", "expected_lifespan"
+     - WHY: These cannot be found on product specs
+
+  4. **Comparative Judgments**: Fields comparing to other products
+     - BAD: "value_for_money", "best_in_class", "recommended_for"
+     - WHY: These are editorial opinions, not specs
+
+  ## ALLOWED Field Types (generate these):
+
+  1. **Official Specifications**: Directly from manufacturer
+     - GOOD: "engine_power_hp", "battery_capacity_kwh", "screen_size_inches"
+     - GOOD: "zero_to_sixty_seconds", "top_speed_mph", "fuel_economy_mpg"
+     - GOOD: "weight_kg", "dimensions_mm", "storage_capacity_gb"
+
+  2. **Features (Yes/No)**: Presence of specific features
+     - GOOD: "has_bluetooth", "has_sunroof", "supports_fast_charging"
+     - GOOD: "has_warranty", "includes_accessories"
+
+  3. **Feature Lists**: Lists of included features, accessories, or capabilities
+     - GOOD: "safety_features" (list of airbags, ABS, traction control, etc.)
+     - GOOD: "connectivity_options" (list of Bluetooth, WiFi, USB-C, etc.)
+     - GOOD: "included_accessories" (list of what's in the box)
+     - GOOD: "cooking_modes" (list of available modes/programs)
+     - GOOD: "supported_formats" (list of file formats, codecs, etc.)
+
+  4. **Official Certifications/Ratings**: From regulatory bodies
+     - GOOD: "safety_rating_ncap", "energy_rating", "emissions_class"
+     - GOOD: "ip_rating", "noise_level_db" (if measured officially)
+
+  5. **Pricing**: Official listed prices
+     - GOOD: "msrp_usd", "starting_price"
 
   ## Field Generation Rules
 
@@ -22,36 +74,42 @@ system_prompt: |
      - GOOD: "Extract the kettle's water capacity in liters. Look for 'capacity', 'volume', or 'L'."
      - BAD: "Extract capacity"
 
-  3. **Address user requirements**: If user wants "quiet operation", include "noise_level_db"
+  3. **Address user requirements**: If user wants "fast", include relevant speed specs
+     - User wants "fast car" → include "zero_to_sixty_seconds", "engine_power_hp"
+     - User wants "fast kettle" → include "boil_time_seconds", "power_watts"
 
-  4. **Fields must be extractable**: Only include specs commonly found on product pages/reviews
-
-  5. **Prioritize by importance**: Put most important comparison fields first
+  4. **Prioritize by importance**: Put most important comparison fields first
 
   ## Prompt Quality Guidelines
 
   Each field needs a detailed extraction prompt that:
-  - Specifies exact format expected (e.g., "as X.X/5", "in watts", "Yes/No")
+  - Specifies exact format expected (e.g., "in watts", "Yes/No", "as X.X seconds")
   - Lists synonyms or alternative terms to look for
   - Provides fallback instructions if data not found
+  - Specifies to return "N/A" or null if not available (don't guess)
 
   ### Examples of GOOD extraction prompts:
-  - "Extract the product's power consumption in watts. Look for 'wattage', 'power', 'W', or 'watts'. If a range is given, use the maximum value."
-  - "Extract the warranty duration in years. Look for 'warranty', 'guarantee', 'coverage period'. Convert months to years if needed."
-  - "Determine if the product has temperature control. Answer 'Yes' if it has variable temperature settings, 'No' if fixed temperature only."
+  - "Extract the engine power in horsepower (hp). Look for 'horsepower', 'hp', 'bhp', or 'PS' (convert PS to hp by multiplying by 0.986). Return the number only."
+  - "Extract the 0-60 mph acceleration time in seconds. Look for '0-60', '0-62', 'acceleration'. Return as decimal seconds (e.g., 5.2)."
+  - "Determine if the product has Bluetooth connectivity. Answer 'Yes' if Bluetooth is listed in features, 'No' if explicitly not mentioned, 'N/A' if unclear."
+  - "Extract the list of safety features. Look for airbags, ABS, traction control, lane assist, blind spot monitoring, etc. Return as a comma-separated list."
+  - "Extract all connectivity options. Look for Bluetooth, WiFi, USB, HDMI, NFC, etc. Return as a comma-separated list of supported connections."
 
   ### Examples of BAD extraction prompts:
-  - "Extract wattage" (too vague, no format specified)
-  - "Get the warranty" (no unit, no synonyms)
-  - "Temperature control?" (not a proper instruction)
+  - "Rate the handling on a scale of 1-10" (subjective, not extractable)
+  - "Estimate yearly maintenance costs" (requires estimation)
+  - "How comfortable is it?" (subjective opinion)
 
   ## Output Format
 
   Return exactly 5-10 fields. Each field needs:
-  - name: snake_case identifier (e.g., "capacity_liters")
-  - prompt: Detailed extraction instructions
-  - data_type: One of "string", "number", "boolean"
+  - name: snake_case identifier with units (e.g., "engine_power_hp", "capacity_liters")
+  - prompt: Detailed extraction instructions for FACTUAL data only
+  - data_type: One of "string", "number", "boolean", "list"
   - rationale: Brief explanation of why this field is important for comparison
+
+  Use "list" data_type for fields that extract multiple items (features, accessories, options).
+  List fields should instruct to return comma-separated values.
 
 # User prompt template
 user_prompt_template: |
@@ -65,18 +123,24 @@ user_prompt_template: |
 
   ## Instructions
   Generate 5-10 category-specific comparison fields that:
-  1. Cover the key specs buyers compare for this product type
+  1. Cover the key OFFICIAL SPECS buyers compare for this product type
   2. Address the user's specific must-have and nice-to-have requirements
   3. Include fields relevant to the user's priorities
-  4. Are commonly found on product pages and review sites
+  4. Are VERIFIABLE facts found on official product pages and spec sheets
+
+  IMPORTANT REMINDERS:
+  - NO subjective ratings (handling_rating, comfort_score, etc.)
+  - NO cost estimates (maintenance_cost_estimate, running_costs, etc.)
+  - NO predicted values (reliability_prediction, resale_value, etc.)
+  - ONLY include specs that appear on official product pages
 
   For each field, provide:
   - A specific, snake_case name (include units where applicable)
-  - A detailed extraction prompt with format, synonyms, and fallback instructions
+  - A detailed extraction prompt for FACTUAL DATA ONLY
   - The appropriate data type
   - A brief rationale for why this field matters
 
-  Focus on specs that genuinely differentiate products in this category.
+  Focus on specs that genuinely differentiate products and CAN BE VERIFIED.
   Do NOT include generic fields like name, price, or rating (those are handled separately).
 
 # Fallback field templates for common categories
@@ -84,60 +148,90 @@ user_prompt_template: |
 fallback_templates:
   electronics:
     - name: "power_watts"
-      prompt: "Extract the power consumption or wattage in watts. Look for 'W', 'watts', 'power consumption'."
+      prompt: "Extract the power consumption or wattage in watts. Look for 'W', 'watts', 'power consumption'. Return N/A if not specified."
       data_type: "number"
     - name: "dimensions_cm"
-      prompt: "Extract the product dimensions in centimeters (L x W x H). Format as 'LxWxH cm'."
+      prompt: "Extract the product dimensions in centimeters (L x W x H). Format as 'LxWxH cm'. Return N/A if not specified."
       data_type: "string"
     - name: "weight_kg"
-      prompt: "Extract the product weight in kilograms. Convert from grams or pounds if needed."
+      prompt: "Extract the product weight in kilograms. Convert from grams or pounds if needed. Return N/A if not specified."
       data_type: "number"
+    - name: "connectivity_options"
+      prompt: "Extract all connectivity options. Look for Bluetooth, WiFi, USB, HDMI, NFC, Ethernet, etc. Return as comma-separated list."
+      data_type: "list"
     - name: "warranty_years"
-      prompt: "Extract the warranty duration in years. Convert months to years if needed."
+      prompt: "Extract the warranty duration in years. Convert months to years if needed. Return N/A if not specified."
       data_type: "number"
-    - name: "energy_rating"
-      prompt: "Extract the energy efficiency rating (e.g., A+++, A++, A+, A, B, C, D)."
-      data_type: "string"
 
   appliances:
     - name: "capacity"
-      prompt: "Extract the product capacity with units (liters, kg, cubic feet, etc.)."
+      prompt: "Extract the product capacity with units (liters, kg, cubic feet, etc.). Return N/A if not specified."
       data_type: "string"
     - name: "power_watts"
-      prompt: "Extract the power consumption in watts."
+      prompt: "Extract the power consumption in watts. Return N/A if not specified."
       data_type: "number"
+    - name: "programs_modes"
+      prompt: "Extract the list of available programs, modes, or settings. Return as comma-separated list."
+      data_type: "list"
     - name: "noise_level_db"
-      prompt: "Extract the noise level in decibels (dB). Look for 'noise', 'sound level', 'dB'."
-      data_type: "number"
-    - name: "programs_count"
-      prompt: "Extract the number of programs, modes, or settings available."
+      prompt: "Extract the official noise level in decibels (dB). Look for 'noise', 'sound level', 'dB'. Return N/A if not specified."
       data_type: "number"
     - name: "energy_rating"
-      prompt: "Extract the energy efficiency rating."
+      prompt: "Extract the energy efficiency rating. Return N/A if not specified."
+      data_type: "string"
+
+  vehicles:
+    - name: "engine_power_hp"
+      prompt: "Extract the engine power in horsepower (hp). Look for 'hp', 'bhp', 'PS'. Convert PS to hp if needed (PS * 0.986). Return N/A if not specified."
+      data_type: "number"
+    - name: "zero_to_sixty_seconds"
+      prompt: "Extract the 0-60 mph (or 0-100 km/h) acceleration time in seconds. Return N/A if not specified."
+      data_type: "number"
+    - name: "fuel_economy_mpg"
+      prompt: "Extract the combined fuel economy in mpg. Convert from L/100km if needed. Return N/A if not specified."
+      data_type: "number"
+    - name: "safety_features"
+      prompt: "Extract the list of safety features. Look for airbags, ABS, traction control, stability control, lane assist, blind spot monitoring, parking sensors, etc. Return as comma-separated list."
+      data_type: "list"
+    - name: "transmission_type"
+      prompt: "Extract the transmission type (manual, automatic, CVT, DCT, etc.). Return N/A if not specified."
+      data_type: "string"
+    - name: "drivetrain"
+      prompt: "Extract the drivetrain type (FWD, RWD, AWD, 4WD). Return N/A if not specified."
       data_type: "string"
 
   default:
-    - name: "key_feature_1"
-      prompt: "Extract the primary distinguishing feature of this product."
+    - name: "key_specification_1"
+      prompt: "Extract the primary technical specification of this product with units."
       data_type: "string"
-    - name: "key_feature_2"
-      prompt: "Extract the secondary distinguishing feature of this product."
+    - name: "key_specification_2"
+      prompt: "Extract the secondary technical specification of this product with units."
       data_type: "string"
+    - name: "key_features"
+      prompt: "Extract the main features of this product. Return as comma-separated list."
+      data_type: "list"
     - name: "material"
-      prompt: "Extract the primary material or build quality information."
+      prompt: "Extract the primary material or construction information."
       data_type: "string"
     - name: "warranty_years"
-      prompt: "Extract the warranty duration in years."
+      prompt: "Extract the warranty duration in years. Return N/A if not specified."
       data_type: "number"
-    - name: "country_of_origin"
-      prompt: "Extract where the product is manufactured or the brand's country of origin."
-      data_type: "string"
 
 # Validation rules
 validation:
   min_fields: 5
   max_fields: 10
-  required_data_types:
+  allowed_data_types:
     - string
     - number
+    - boolean
+    - list
   name_pattern: "^[a-z][a-z0-9_]*$"  # snake_case
+  forbidden_patterns:
+    - "_rating$"
+    - "_score$"
+    - "_out_of_\\d+"
+    - "_estimate"
+    - "_prediction"
+    - "value_for_money"
+    - "best_in_class"

@@ -8,7 +8,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from app.models.state import AgentState
-from app.services.llm import get_llm_service
+from app.services.llm import get_intake_llm_service, get_llm_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,40 +28,49 @@ class UserRequirements(BaseModel):
 
     product_type: str | None = Field(
         None,
-        description="The type/category of product the user wants (e.g., 'electric kettle', 'laptop', 'toaster')",
+        description="The type/category of product the user wants (e.g., 'electric kettle', 'laptop', 'sports car')",
     )
     budget_min: float | None = Field(None, description="Minimum budget in the local currency")
     budget_max: float | None = Field(None, description="Maximum budget in the local currency")
     must_haves: list[str] = Field(
         default_factory=list,
-        description="Non-negotiable features the product must have",
+        description="Non-negotiable features the product must have (e.g., 'fast', 'good handling', 'variable temperature')",
     )
     nice_to_haves: list[str] = Field(
         default_factory=list,
-        description="Preferred features that are flexible",
+        description="Preferred features that are flexible (e.g., 'leather seats', 'bluetooth')",
     )
     priorities: list[str] = Field(
         default_factory=list,
-        description="What to optimize for (e.g., 'build quality', 'price', 'speed')",
+        description="What to optimize for, in order of importance (e.g., 'speed', 'handling', 'daily usability')",
+    )
+    specifications: list[str] = Field(
+        default_factory=list,
+        description="Positive specifications that narrow the search scope - condition, age, location, type (e.g., 'second hand', 'year 2010-2020', 'UK market', 'manual transmission', 'coupe or convertible')",
     )
     constraints: list[str] = Field(
         default_factory=list,
-        description="What to avoid (e.g., 'no plastic', 'not from X brand')",
+        description="Things to explicitly AVOID - negative requirements only (e.g., 'no German cars', 'avoid high mileage over 100k', 'not automatic')",
     )
 
 
 class IntakeDecision(BaseModel):
-    """Decision about whether to proceed to research or continue gathering requirements."""
+    """Decision about how to continue the intake conversation."""
 
-    requirements_sufficient: bool = Field(
-        description="True if we have enough information to proceed to product research"
+    user_asked_question: bool = Field(
+        default=False,
+        description="True if the user's last message was asking for information/clarification (e.g., 'What is OLED?', 'What's the difference between...')",
     )
-    reasoning: str = Field(
-        description="Brief explanation of why requirements are or aren't sufficient"
+    user_ready_to_search: bool = Field(
+        default=False,
+        description="True if the user explicitly wants to proceed to search (e.g., 'search now', 'show me options', 'let's see what you find')",
     )
-    next_question: str | None = Field(
+    response: str = Field(
+        description="Your response to the user. If they asked a question, answer it educationally. Otherwise, acknowledge their input and suggest a relevant consideration or ask a clarifying question.",
+    )
+    suggested_consideration: str | None = Field(
         None,
-        description="If requirements insufficient, what question to ask the user next (conversational, not interrogating)",
+        description="A product-specific consideration to mention (e.g., 'panel type for TVs', 'noise cancelling for headphones'). Only include if naturally relevant to the conversation.",
     )
 
 
@@ -101,6 +110,10 @@ def format_requirements_summary(requirements: dict) -> str:
     priorities = requirements.get("priorities", [])
     if priorities:
         parts.append(f"**Priorities:** {', '.join(priorities)}")
+
+    specifications = requirements.get("specifications", [])
+    if specifications:
+        parts.append(f"**Specifications:** {', '.join(specifications)}")
 
     constraints = requirements.get("constraints", [])
     if constraints:
@@ -177,7 +190,7 @@ async def intake_node(state: AgentState) -> Command:
             choice = parse_hitl_choice(last_message.content)
             logger.info(f"INTAKE: HITL action received - {choice}")
 
-            if choice == "Search Now":
+            if choice in ("Search Now", "Ready to Search"):
                 # User confirmed, proceed to research
                 logger.info("INTAKE: User confirmed, transitioning to RESEARCH")
                 return Command(
@@ -185,18 +198,19 @@ async def intake_node(state: AgentState) -> Command:
                         "messages": [AIMessage(content="Starting the search now...")],
                         "current_node": "intake",
                         "current_phase": "research",
+                        "user_requirements": current_requirements,
                         **_clear_hitl_flags(),
                     },
                     goto="research",
                 )
             else:
-                # User wants to edit requirements
-                logger.info("INTAKE: User wants to edit requirements")
+                # User wants to continue refining (shouldn't happen with current UI, but handle gracefully)
+                logger.info("INTAKE: User wants to continue refining")
                 return Command(
                     update={
                         "messages": [
                             AIMessage(
-                                content="No problem! What would you like to change or add to your requirements?"
+                                content="No problem! What else would you like to tell me about what you're looking for?"
                             )
                         ],
                         "current_node": "intake",
@@ -207,6 +221,9 @@ async def intake_node(state: AgentState) -> Command:
                 )
 
     try:
+        # Use GPT-4.1 for requirement extraction (better at nuanced understanding)
+        intake_llm = get_intake_llm_service()
+        # Keep standard LLM for conversational responses
         llm_service = get_llm_service()
 
         # Step 1: Extract requirements from conversation using structured output
@@ -221,7 +238,7 @@ If something hasn't been mentioned, leave it as None or empty list."""
         requirements_messages = messages.copy()
         requirements_messages.append(HumanMessage(content=requirements_prompt))
 
-        extracted_requirements = await llm_service.generate_structured(
+        extracted_requirements = await intake_llm.generate_structured(
             requirements_messages,
             schema=UserRequirements,
             system_prompt=INTAKE_SYSTEM_PROMPT,
@@ -231,24 +248,30 @@ If something hasn't been mentioned, leave it as None or empty list."""
         updated_requirements = extracted_requirements.model_dump(exclude_none=True)
 
         # Merge lists properly (don't overwrite with empty lists)
-        for key in ["must_haves", "nice_to_haves", "priorities", "constraints"]:
+        for key in ["must_haves", "nice_to_haves", "priorities", "specifications", "constraints"]:
             if key in current_requirements and current_requirements[key]:
                 if key not in updated_requirements or not updated_requirements[key]:
                     updated_requirements[key] = current_requirements[key]
 
         logger.info(f"Extracted requirements: {updated_requirements}")
 
-        # Step 2: Ask LLM to decide if requirements are sufficient
-        decision_prompt = f"""Based on the current requirements, decide if we have enough information to search for products.
+        # Step 2: Generate conversational response with contextual suggestions
+        # Check if we have minimum viable requirements (product type known)
+        has_product_type = bool(updated_requirements.get("product_type"))
+
+        decision_prompt = f"""Analyze the user's last message and generate an appropriate response.
 
 Current requirements:
 {yaml.dump(updated_requirements, default_flow_style=False)}
 
-Minimum needed to proceed:
-- Product type identified (what category of thing they want)
-- At least one constraint (budget, must-have feature, or priority)
+Your task:
+1. If the user asked a question (e.g., "What is OLED?", "What's the difference between..."), answer it educationally with practical trade-offs.
+2. If the user provided new information, acknowledge it and either:
+   - Suggest a relevant consideration they might not have thought about (e.g., "Have you considered panel type?" for TVs)
+   - Ask a clarifying question that would meaningfully affect their choice
+3. If the user explicitly wants to search ("show me options", "let's search", "I'm ready"), set user_ready_to_search to true.
 
-Consider the conversation flow - if the user seems ready to see results or has answered your clarifying questions, requirements might be sufficient."""
+Be a knowledgeable consultant—proactively helpful, not just reactive. Don't ask multiple questions at once."""
 
         decision_messages = messages.copy()
         decision_messages.append(HumanMessage(content=decision_prompt))
@@ -260,53 +283,44 @@ Consider the conversation flow - if the user seems ready to see results or has a
         )
 
         logger.info(
-            f"Decision: sufficient={decision.requirements_sufficient}, reasoning={decision.reasoning}"
+            f"Decision: user_ready={decision.user_ready_to_search}, asked_question={decision.user_asked_question}"
         )
 
-        # Step 3: Generate conversational response
-        if decision.requirements_sufficient:
-            # Ready to search - pause for HITL confirmation
-            summary = format_requirements_summary(updated_requirements)
-            confirmation_message = f"Here's what I found from our conversation:\n\n{summary}\n\nReady to search for products?"
-
-            logger.info("INTAKE: Requirements sufficient, awaiting HITL confirmation")
-
+        # If user explicitly wants to search, proceed to research
+        if decision.user_ready_to_search:
+            logger.info("INTAKE: User ready to search, transitioning to RESEARCH")
             return Command(
                 update={
-                    "messages": [AIMessage(content=confirmation_message)],
+                    "messages": [AIMessage(content="Starting the search now...")],
                     "current_node": "intake",
-                    "current_phase": "intake",  # Stay in intake until confirmed
+                    "current_phase": "research",
+                    "user_requirements": updated_requirements,
+                    **_clear_hitl_flags(),
+                },
+                goto="research",
+            )
+
+        # Build response - continue conversational intake
+        response_content = decision.response
+
+        # Show "Ready to Search" escape hatch once we know the product type
+        # This lets users proceed whenever they want, without waiting for the agent to decide
+        if has_product_type:
+            logger.info("INTAKE: Product type known, showing escape hatch button")
+            return Command(
+                update={
+                    "messages": [AIMessage(content=response_content)],
+                    "current_node": "intake",
+                    "current_phase": "intake",
                     "user_requirements": updated_requirements,
                     "awaiting_requirements_confirmation": True,
-                    "pending_requirements_summary": summary,
-                    "action_choices": ["Search Now", "Edit Requirements"],
+                    "action_choices": ["Ready to Search"],
                 },
-                goto="__end__",  # Return control to user for HITL
+                goto="__end__",
             )
         else:
-            # Need more information - ask the next question
-            if decision.next_question:
-                response_content = decision.next_question
-            else:
-                # Fallback: generate a question
-                question_prompt = f"""Generate a friendly follow-up question to gather more requirements.
-
-Current requirements:
-{yaml.dump(updated_requirements, default_flow_style=False)}
-
-Ask about ONE specific thing that would help narrow down the search. Be conversational, not interrogating."""
-
-                question_messages = messages.copy()
-                question_messages.append(HumanMessage(content=question_prompt))
-
-                llm_response = await llm_service.generate(
-                    question_messages,
-                    system_prompt=INTAKE_SYSTEM_PROMPT,
-                )
-                response_content = llm_response.content
-
-            logger.info("Staying in INTAKE")
-
+            # Still gathering basic info (no product type yet)
+            logger.info("Staying in INTAKE, gathering product type")
             return Command(
                 update={
                     "messages": [AIMessage(content=response_content)],
@@ -314,7 +328,7 @@ Ask about ONE specific thing that would help narrow down the search. Be conversa
                     "current_phase": "intake",
                     "user_requirements": updated_requirements,
                 },
-                goto="__end__",  # Return control to user for next input
+                goto="__end__",
             )
 
     except Exception:

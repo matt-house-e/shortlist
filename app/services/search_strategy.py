@@ -161,6 +161,8 @@ class SearchStrategyService:
             "year": datetime.now().year,
             "must_haves": requirements.get("must_haves", []),
             "nice_to_haves": requirements.get("nice_to_haves", []),
+            "specifications": requirements.get("specifications", []),
+            "constraints": requirements.get("constraints", []),
             "budget_constraint": f"{region_config.get('currency', '£')}{budget_max}"
             if budget_max
             else "No specific budget",
@@ -184,6 +186,8 @@ class SearchStrategyService:
             "use_cases",
             "must_haves",
             "nice_to_haves",
+            "specifications",
+            "constraints",
             "priorities",
         ]:
             if isinstance(formatted_context.get(key), list):

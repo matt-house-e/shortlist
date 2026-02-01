@@ -158,6 +158,25 @@ class FieldGenerationService:
             "pressure cooker",
         ]
 
+        # Vehicle keywords
+        vehicle_keywords = [
+            "car",
+            "vehicle",
+            "sedan",
+            "suv",
+            "truck",
+            "motorcycle",
+            "motorbike",
+            "coupe",
+            "convertible",
+            "hatchback",
+            "wagon",
+            "sports car",
+            "electric vehicle",
+            "ev",
+            "hybrid",
+        ]
+
         for keyword in electronics_keywords:
             if keyword in product_lower:
                 return "electronics"
@@ -165,6 +184,10 @@ class FieldGenerationService:
         for keyword in appliance_keywords:
             if keyword in product_lower:
                 return "appliances"
+
+        for keyword in vehicle_keywords:
+            if keyword in product_lower:
+                return "vehicles"
 
         return "default"
 

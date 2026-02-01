@@ -73,9 +73,13 @@ class UserRequirements(BaseSchema):
         default_factory=list,
         description="Ordered list of user priorities (e.g., 'price', 'quality', 'brand')",
     )
+    specifications: list[str] = Field(
+        default_factory=list,
+        description="Positive specifications that narrow the search (e.g., 'second hand', 'year 2010-2020', 'UK only', 'manual transmission')",
+    )
     constraints: list[str] = Field(
         default_factory=list,
-        description="Constraints or limitations (e.g., 'must ship to Canada', 'eco-friendly only')",
+        description="Things to explicitly avoid (e.g., 'no plastic', 'not BMW', 'avoid high mileage')",
     )
 
 

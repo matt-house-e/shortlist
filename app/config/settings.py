@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_temperature: float = 0.7
 
+    # Intake-specific model (GPT-4.1 for better requirement extraction)
+    intake_model: str = "gpt-4.1"
+    intake_temperature: float = 0.3
+
+    # -------------------------------------------------------------------------
+    # Research Configuration
+    # -------------------------------------------------------------------------
+    max_products: int = 30  # Maximum number of products to include in comparison
+
     # -------------------------------------------------------------------------
     # Database Configuration
     # -------------------------------------------------------------------------
@@ -80,7 +89,7 @@ class Settings(BaseSettings):
     lattice_enable_checkpointing: bool = True
     lattice_checkpoint_interval: int = 100
     lattice_max_retries: int = 3
-    lattice_reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    lattice_reasoning_effort: Literal["low", "medium", "high"] = "low"
     lattice_use_reasoning: bool = True
 
     # -------------------------------------------------------------------------

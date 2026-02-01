@@ -70,9 +70,13 @@ def _summarize_requirements(requirements: dict) -> str:
     if priorities:
         parts.append(f"Priorities: {', '.join(priorities)}")
 
+    specifications = requirements.get("specifications", [])
+    if specifications:
+        parts.append(f"Specifications: {', '.join(specifications)}")
+
     constraints = requirements.get("constraints", [])
     if constraints:
-        parts.append(f"Constraints: {', '.join(constraints)}")
+        parts.append(f"Avoid: {', '.join(constraints)}")
 
     return "; ".join(parts)
 
@@ -153,17 +157,87 @@ async def _generate_search_queries(
         )
 
 
-def _extract_candidates_from_response(response_content: str) -> list[dict]:
+def _match_citation_to_product(
+    product_name: str,
+    manufacturer: str,
+    citations: list,
+) -> str | None:
+    """
+    Find the best matching citation URL for a product.
+
+    Args:
+        product_name: Full product name
+        manufacturer: Brand/manufacturer name
+        citations: List of Citation objects with url and title
+
+    Returns:
+        Best matching URL or None
+    """
+    if not citations:
+        return None
+
+    # Normalize for matching
+    name_lower = product_name.lower()
+    mfr_lower = manufacturer.lower() if manufacturer else ""
+
+    # Extract key terms from product name (first few words, model numbers)
+    name_terms = [t for t in name_lower.split()[:4] if len(t) > 2]
+
+    best_match = None
+    best_score = 0
+
+    for citation in citations:
+        url_lower = citation.url.lower()
+        title_lower = (citation.title or "").lower()
+
+        score = 0
+
+        # Check manufacturer in URL or title (strong signal)
+        if mfr_lower and len(mfr_lower) > 2:
+            if mfr_lower in url_lower:
+                score += 3
+            if mfr_lower in title_lower:
+                score += 2
+
+        # Check product name terms
+        for term in name_terms:
+            if term in url_lower:
+                score += 1
+            if term in title_lower:
+                score += 1
+
+        # Prefer manufacturer domains over retailers
+        retailer_domains = ["amazon", "bestbuy", "walmart", "target", "ebay", "newegg"]
+        is_retailer = any(r in url_lower for r in retailer_domains)
+        if is_retailer:
+            score -= 1  # Slight penalty for retailers
+
+        if score > best_score:
+            best_score = score
+            best_match = citation.url
+
+    # Only return if we have a reasonable match (at least manufacturer matched)
+    return best_match if best_score >= 2 else None
+
+
+def _extract_candidates_from_response(
+    response_content: str,
+    citations: list | None = None,
+) -> list[dict]:
     """
     Extract product candidates from web search response.
 
+    Uses real URLs from citations instead of LLM-hallucinated URLs.
+
     Args:
         response_content: Raw response content from web search
+        citations: List of Citation objects from web search (with real URLs)
 
     Returns:
         List of candidate dicts
     """
     candidates = []
+    citations = citations or []
 
     # Try to extract JSON array from response
     try:
@@ -181,11 +255,29 @@ def _extract_candidates_from_response(response_content: str) -> list[dict]:
             if isinstance(parsed, list):
                 for item in parsed:
                     if isinstance(item, dict) and "name" in item:
+                        name = item.get("name", "")
+                        manufacturer = item.get("manufacturer", "Unknown")
+
+                        # Match citation URL instead of using hallucinated URL
+                        matched_url = _match_citation_to_product(name, manufacturer, citations)
+
+                        # Log when we replace a hallucinated URL
+                        hallucinated_url = item.get("official_url")
+                        if hallucinated_url and matched_url:
+                            logger.debug(
+                                f"Replaced hallucinated URL for {name}: "
+                                f"{hallucinated_url} -> {matched_url}"
+                            )
+                        elif hallucinated_url and not matched_url:
+                            logger.debug(
+                                f"No citation match for {name}, discarding hallucinated URL"
+                            )
+
                         candidates.append(
                             {
-                                "name": item.get("name", ""),
-                                "manufacturer": item.get("manufacturer", "Unknown"),
-                                "official_url": item.get("official_url"),
+                                "name": name,
+                                "manufacturer": manufacturer,
+                                "official_url": matched_url,  # Use real URL from citations
                                 "description": item.get("description", ""),
                             }
                         )
@@ -248,21 +340,20 @@ SEARCH_SYSTEM_PROMPT = """You are a product researcher. Search for products matc
 For each product found, extract:
 - Full product name (be specific, include model numbers)
 - Manufacturer/brand
-- Official product URL (manufacturer site preferred, not retailer)
 - Brief description
 
 Return results as a JSON array:
 [
-    {"name": "Product Name Model X123", "manufacturer": "Brand", "official_url": "https://...", "description": "Brief description"},
+    {"name": "Product Name Model X123", "manufacturer": "Brand", "description": "Brief description"},
     ...
 ]
 
 IMPORTANT:
 - Find 8-15 DISTINCT products per search
 - Include model numbers/variants when available
-- Prioritize manufacturer URLs over retailer URLs
 - Include a mix of popular and lesser-known options
-- Don't repeat the same product with different names"""
+- Don't repeat the same product with different names
+- Do NOT include URLs - they will be extracted from citations automatically"""
 
 
 async def _execute_parallel_searches(
@@ -296,7 +387,8 @@ async def _execute_parallel_searches(
                 system_prompt=SEARCH_SYSTEM_PROMPT,
             )
 
-            candidates = _extract_candidates_from_response(response.content)
+            # Pass citations to extract real URLs instead of hallucinated ones
+            candidates = _extract_candidates_from_response(response.content, response.citations)
 
             # Log with angle and count
             logger.info(
@@ -392,9 +484,10 @@ async def generate_field_definitions(
             "category": "standard",
             "name": "official_url",
             "prompt": (
-                "Extract the official product page URL from the manufacturer's website. "
+                "Select the official product page URL from the 'Source:' URLs provided in the search results. "
+                "ONLY use URLs that appear in the source context - NEVER generate or guess URLs. "
                 "Prefer manufacturer URLs over retailer URLs (Amazon, Best Buy, etc.). "
-                "If no official URL found, use the most authoritative product page."
+                "If no suitable URL is found in the sources, return null."
             ),
             "data_type": "string",
         },
@@ -630,13 +723,22 @@ async def explorer_step(state: AgentState) -> tuple[list[dict], list[dict]]:
     dedup_rate = (1 - len(candidates) / max(len(raw_candidates), 1)) * 100
     logger.info(f"Unique candidates: {len(candidates)} (removed {dedup_rate:.1f}% duplicates)")
 
+    # Apply max_products limit from settings
+    settings = get_settings()
+    max_products = settings.max_products
+    if len(candidates) > max_products:
+        logger.info(
+            f"Limiting candidates from {len(candidates)} to {max_products} (max_products setting)"
+        )
+        candidates = candidates[:max_products]
+
     # Log brand diversity
     brands = {c.get("manufacturer", "Unknown") for c in candidates}
     logger.info(f"Brand diversity: {len(brands)} unique brands")
 
-    # Warn if fewer than expected
-    if len(candidates) < 20:
-        logger.warning(f"Only {len(candidates)} candidates found (target: 40+)")
+    # Warn if fewer than expected minimum
+    if len(candidates) < 10:
+        logger.warning(f"Only {len(candidates)} candidates found (expected at least 10)")
 
     # Generate field definitions (including category-specific and qualification fields)
     logger.info("-" * 40)
