@@ -4,10 +4,10 @@ dev:
 	PYTHONPATH=. uv run chainlit run app/chat/handlers.py --host 0.0.0.0 --port 8000 -w
 
 up:
-	docker compose up -d
+	docker compose up
 
 rebuild:
-	docker compose up --build -d
+	docker compose up --build
 
 down:
 	docker compose down
