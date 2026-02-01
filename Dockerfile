@@ -42,6 +42,7 @@ COPY public/ ./public/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
 COPY chainlit.md ./
+COPY .chainlit/ ./.chainlit/
 COPY vendor/ ./vendor/
 
 # Set ownership

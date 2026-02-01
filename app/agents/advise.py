@@ -13,23 +13,43 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-ADVISE_SYSTEM_PROMPT = """You are a knowledgeable product advisor presenting research results.
+ADVISE_SYSTEM_PROMPT = """You are a product advisor presenting research results. The comparison table is displayed separately - your job is to ADD INSIGHT, not repeat data.
 
-Your role is to:
-- Present the top 5 products from the comparison table
-- Explain trade-offs clearly and honestly
-- Highlight why each option made the list
-- Don't push a single option; present choices
-- Acknowledge data limitations
+## Response Format (use this structure)
 
-The user can:
-- Ask follow-up questions
-- Request purchase links
-- Request CSV export
-- Ask for more options (triggers new RESEARCH)
-- Ask for new comparison fields (triggers ENRICHER only)
-- Change requirements (returns to INTAKE)
-- End the session"""
+### My Pick: [Product Name] ($X)
+One sentence explaining why this best matches their criteria.
+
+---
+
+### Quick Comparison
+| | Best For | Trade-off |
+|---|---|---|
+| **[Product 1]** | [key strength] | [main weakness] |
+| **[Product 2]** | [key strength] | [main weakness] |
+| **[Product 3]** | [key strength] | [main weakness] |
+
+### Beyond the Top 3
+Use the full product list to surface valuable alternatives:
+- **Best Value**: [Product] at $X offers [benefit] if [trade-off is acceptable]
+- **If Budget Stretches**: [Product] at $X adds [compelling feature]
+- **Budget-Friendly**: [Product] at $X still delivers [core need]
+
+Only include sections that are genuinely useful based on the data.
+
+---
+
+**[End with 1-2 specific follow-up options relevant to their search]**
+
+## Rules
+- NEVER list specs (price, battery mAh, camera MP) - the table shows these
+- DO compare and contrast - help them DECIDE
+- Use **bold** for product names and key decision points
+- Use horizontal rules (---) to create visual sections
+- Keep it scannable - busy users skim
+- Be honest about trade-offs and data gaps
+
+The user can ask follow-up questions, request purchase links/CSV export, ask for more options, add comparison fields, or change requirements."""
 
 
 class UserIntent(BaseModel):
@@ -260,11 +280,9 @@ async def advise_node(state: AgentState) -> Command:
             living_table = ComparisonTable.model_validate(living_table_data)
             field_names = living_table.get_field_names(exclude_internal=True)
 
-            # Build top candidates data from living table
-            top_candidates = []
-            for i, row in enumerate(living_table.rows.values()):
-                if i >= 5:
-                    break
+            # Build candidates data from living table - include more for comparative insights
+            all_candidates = []
+            for row in living_table.rows.values():
                 candidate_data = {
                     "name": row.candidate.name,
                     "manufacturer": row.candidate.manufacturer,
@@ -274,20 +292,24 @@ async def advise_node(state: AgentState) -> Command:
                     cell = row.cells.get(field_name)
                     if cell and cell.value is not None:
                         candidate_data[field_name] = cell.value
-                top_candidates.append(candidate_data)
+                all_candidates.append(candidate_data)
 
+            # Provide top 5 for main recommendation + additional products for comparative insights
             table_data = {
                 "total_candidates": living_table.get_row_count(),
                 "qualified_candidates": len(living_table.get_qualified_rows()),
                 "fields": field_names,
-                "top_5_products": top_candidates,
+                "top_5_products": all_candidates[:5],
+                "additional_products": all_candidates[
+                    5:15
+                ],  # Next 10 for "stretch budget", "best value" insights
             }
 
             table_context = f"\n\nComparison Table Data:\n{json.dumps(table_data, indent=2, ensure_ascii=False)}"
 
-            # Also include markdown table for easy reference
+            # Also include markdown table for easy reference (top 5 only)
             markdown_table = living_table.to_markdown(max_rows=5)
-            table_context += f"\n\nTable Preview:\n{markdown_table}"
+            table_context += f"\n\nTable Preview (top 5):\n{markdown_table}"
 
         elif comparison_table and comparison_table.get("candidates"):
             # Fall back to legacy comparison_table

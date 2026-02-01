@@ -180,11 +180,10 @@ class TestLoopPrevention:
         # Either it's waiting for requirements confirmation OR requirements weren't sufficient yet
         assert result2.get("current_phase") == "intake"
 
-        # If requirements were sufficient, HITL flags should be set
+        # If product type is known, escape hatch button should be shown
         if result2.get("awaiting_requirements_confirmation"):
-            # HITL is waiting for user to confirm
-            assert result2.get("action_choices") == ["Search Now", "Edit Requirements"]
-            assert result2.get("pending_requirements_summary") is not None
+            # HITL shows escape hatch for user to proceed when ready
+            assert result2.get("action_choices") == ["Ready to Search"]
 
         # Message count check: should be reasonable (not inflated from looping)
         messages = result2.get("messages", [])

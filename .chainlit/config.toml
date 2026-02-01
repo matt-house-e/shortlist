@@ -97,11 +97,12 @@ reaction_on_message_received = false
 # Name of the assistant.
 name = "Shortlist"
 
-# default_theme = "dark"
+# Default theme (start in dark mode for editorial warmth)
+default_theme = "dark"
 
 # Force a specific language for all users (e.g., "en-US", "he-IL", "fr-FR")
 # If not set, the browser's language will be used
-# language = "en-US"
+language = "en-US"
 
 # layout = "wide"
 
@@ -124,17 +125,17 @@ cot = "full"
 
 # Specify a CSS file that can be used to customize the user interface.
 # The CSS file can be served from the public directory or via an external link.
-# custom_css = "/public/test.css"
-
-# Specify additional attributes for a custom CSS file
-# custom_css_attributes = "media=\"print\""
+custom_css = "/public/custom.css"
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# custom_js = "/public/test.js"
+custom_js = "/public/custom.js"
 
 # The style of alert boxes. Can be "classic" or "modern".
-alert_style = "classic"
+alert_style = "modern"
+
+# Custom theme configuration - warm editorial palette
+custom_theme = "theme.json"
 
 # Specify additional attributes for custom JS file
 # custom_js_attributes = "async type = \"module\""
