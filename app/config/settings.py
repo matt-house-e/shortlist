@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Database Configuration
     # -------------------------------------------------------------------------
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template"
+    # Named APP_DATABASE_URL to avoid Chainlit auto-detection of DATABASE_URL
+    app_database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template"
 
     # -------------------------------------------------------------------------
     # S3 Storage Configuration
@@ -56,6 +57,7 @@ class Settings(BaseSettings):
     chainlit_auth_secret: str = ""
     chainlit_host: str = "0.0.0.0"
     chainlit_port: int = 8000
+    enable_data_layer: bool = False  # Set True when running with PostgreSQL
 
     # -------------------------------------------------------------------------
     # Web Search Configuration (OpenAI Responses API)

@@ -303,20 +303,21 @@ async def on_export_csv(action: cl.Action):
 
 
 # =============================================================================
-# Data Layer
+# Data Layer (optional - requires PostgreSQL)
 # =============================================================================
 
+if settings.enable_data_layer:
 
-@cl.data_layer
-def get_data_layer():
-    """
-    Create Chainlit data layer for conversation persistence.
+    @cl.data_layer
+    def get_data_layer():
+        """
+        Create Chainlit data layer for conversation persistence.
 
-    Strips SQLAlchemy driver prefix from DATABASE_URL for asyncpg compatibility.
-    """
-    # Convert SQLAlchemy URL to plain postgres URL for Chainlit
-    db_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    return ChainlitDataLayer(database_url=db_url)
+        Strips SQLAlchemy driver prefix for asyncpg compatibility.
+        """
+        # Convert SQLAlchemy URL to plain postgres URL for Chainlit
+        db_url = settings.app_database_url.replace("postgresql+asyncpg://", "postgresql://")
+        return ChainlitDataLayer(database_url=db_url)
 
 
 # =============================================================================

@@ -18,6 +18,7 @@ from app.models.schemas.shortlist import (
     SearchQueryPlan,
 )
 from app.models.state import AgentState
+from app.services.field_generation import get_field_generation_service
 from app.services.lattice import LatticeService
 from app.services.llm import LLMService
 from app.services.search_strategy import get_search_strategy_service
@@ -335,49 +336,78 @@ async def _execute_parallel_searches(
     return all_candidates
 
 
-def generate_field_definitions(product_type: str, requirements: dict) -> list[dict]:
+async def generate_field_definitions(
+    product_type: str,
+    requirements: dict,
+    llm_service: LLMService,
+) -> list[dict]:
     """
     Generate field definitions based on product category and user requirements.
 
-    The LLM determines appropriate category-specific fields based on its knowledge
+    Uses LLM to determine appropriate category-specific fields based on its knowledge
     of the product type. Standard fields and qualification fields are always included.
 
     Args:
         product_type: Type of product (e.g., "electric kettle", "laptop")
         requirements: User requirements dict
+        llm_service: LLM service for generating category-specific fields
 
     Returns:
-        List of field definition dicts
+        List of field definition dicts (11-16 total: 4 standard + 5-10 category + 2 qualification)
     """
     logger.info(f"Generating field definitions for {product_type}")
 
-    # Standard fields for all products
+    # Standard fields for all products - with improved extraction prompts
     fields = [
         {
             "category": "standard",
             "name": "name",
-            "prompt": "Extract the product name",
+            "prompt": (
+                "Extract the full product name including brand and model number. "
+                "Look for the official product title. Format: 'Brand Model Name'."
+            ),
             "data_type": "string",
         },
         {
             "category": "standard",
             "name": "price",
-            "prompt": "Extract the product price",
+            "prompt": (
+                "Extract the current retail price with currency symbol. "
+                "Use the main price, not sale/discount price. "
+                "If a range is given, use the starting price. Format: '$XX.XX' or '£XX.XX'."
+            ),
             "data_type": "string",
         },
         {
             "category": "standard",
             "name": "rating",
-            "prompt": "Extract the average customer rating",
+            "prompt": (
+                "Extract the average customer rating. "
+                "Look for star ratings, scores, or review averages. "
+                "Format as 'X.X/5' or 'X/10'. If percentage, convert to /5 scale."
+            ),
             "data_type": "string",
         },
         {
             "category": "standard",
             "name": "official_url",
-            "prompt": "Extract the official product URL",
+            "prompt": (
+                "Extract the official product page URL from the manufacturer's website. "
+                "Prefer manufacturer URLs over retailer URLs (Amazon, Best Buy, etc.). "
+                "If no official URL found, use the most authoritative product page."
+            ),
             "data_type": "string",
         },
     ]
+
+    # Generate category-specific fields using LLM
+    logger.info("Generating category-specific fields via LLM...")
+    field_service = get_field_generation_service()
+    category_fields = await field_service.generate_fields(requirements, llm_service)
+
+    # Add category-specific fields
+    fields.extend(category_fields)
+    logger.info(f"Added {len(category_fields)} category-specific fields")
 
     # Add qualification fields for requirement matching
     requirements_summary = _summarize_requirements(requirements)
@@ -386,7 +416,11 @@ def generate_field_definitions(product_type: str, requirements: dict) -> list[di
         {
             "category": "qualification",
             "name": "meets_requirements",
-            "prompt": f"Does this product meet ALL these requirements: {requirements_summary}? Answer TRUE or FALSE only.",
+            "prompt": (
+                f"Does this product meet ALL these requirements: {requirements_summary}? "
+                "Carefully check each requirement against the product specs. "
+                "Answer TRUE only if ALL requirements are met. Answer FALSE if any requirement is not met or unclear."
+            ),
             "data_type": "boolean",
         }
     )
@@ -395,12 +429,16 @@ def generate_field_definitions(product_type: str, requirements: dict) -> list[di
         {
             "category": "qualification",
             "name": "requirement_fit_notes",
-            "prompt": f"Which of these requirements does this product meet or not meet: {requirements_summary}",
+            "prompt": (
+                f"For each of these requirements: {requirements_summary} - "
+                "indicate which are MET, NOT MET, or UNCLEAR. "
+                "Be specific about why each requirement is or isn't satisfied."
+            ),
             "data_type": "string",
         }
     )
 
-    logger.info(f"Generated {len(fields)} field definitions")
+    logger.info(f"Generated {len(fields)} total field definitions")
     return fields
 
 
@@ -600,8 +638,12 @@ async def explorer_step(state: AgentState) -> tuple[list[dict], list[dict]]:
     if len(candidates) < 20:
         logger.warning(f"Only {len(candidates)} candidates found (target: 40+)")
 
-    # Generate field definitions (including qualification fields)
-    field_definitions = generate_field_definitions(product_type, requirements)
+    # Generate field definitions (including category-specific and qualification fields)
+    logger.info("-" * 40)
+    logger.info("Phase 4: Generating category-specific field definitions")
+    logger.info("-" * 40)
+
+    field_definitions = await generate_field_definitions(product_type, requirements, llm_service)
 
     logger.info("=" * 60)
     logger.info(f"Explorer complete: {len(candidates)} candidates, {len(field_definitions)} fields")
@@ -1218,7 +1260,11 @@ async def research_node(state: AgentState) -> Command:
                 logger.warning("No existing field definitions found, regenerating")
                 requirements = state.get("user_requirements", {})
                 product_type = requirements.get("product_type", "product")
-                field_definitions = generate_field_definitions(product_type, requirements)
+                settings = get_settings()
+                llm_service = LLMService(settings)
+                field_definitions = await generate_field_definitions(
+                    product_type, requirements, llm_service
+                )
 
             # Add fields to living table
             for field_dict in field_definitions:

@@ -1,0 +1,143 @@
+# Field Generation Skill
+# Generates category-specific comparison fields based on product type and user requirements
+
+name: field-generation
+version: "1.0"
+description: |
+  Generate 5-10 category-specific comparison fields for product research.
+  Uses LLM's inherent domain knowledge to determine relevant specs for any product category.
+
+# System prompt for field generation
+system_prompt: |
+  You are a product comparison expert. Your task is to generate comparison fields
+  specific to a product category that will help users make informed purchasing decisions.
+
+  ## Field Generation Rules
+
+  1. **Be SPECIFIC**: Use precise field names with units where applicable
+     - GOOD: "capacity_liters", "battery_life_hours", "screen_size_inches"
+     - BAD: "capacity", "battery", "size"
+
+  2. **Include UNITS in extraction prompts**: Make prompts unambiguous
+     - GOOD: "Extract the kettle's water capacity in liters. Look for 'capacity', 'volume', or 'L'."
+     - BAD: "Extract capacity"
+
+  3. **Address user requirements**: If user wants "quiet operation", include "noise_level_db"
+
+  4. **Fields must be extractable**: Only include specs commonly found on product pages/reviews
+
+  5. **Prioritize by importance**: Put most important comparison fields first
+
+  ## Prompt Quality Guidelines
+
+  Each field needs a detailed extraction prompt that:
+  - Specifies exact format expected (e.g., "as X.X/5", "in watts", "Yes/No")
+  - Lists synonyms or alternative terms to look for
+  - Provides fallback instructions if data not found
+
+  ### Examples of GOOD extraction prompts:
+  - "Extract the product's power consumption in watts. Look for 'wattage', 'power', 'W', or 'watts'. If a range is given, use the maximum value."
+  - "Extract the warranty duration in years. Look for 'warranty', 'guarantee', 'coverage period'. Convert months to years if needed."
+  - "Determine if the product has temperature control. Answer 'Yes' if it has variable temperature settings, 'No' if fixed temperature only."
+
+  ### Examples of BAD extraction prompts:
+  - "Extract wattage" (too vague, no format specified)
+  - "Get the warranty" (no unit, no synonyms)
+  - "Temperature control?" (not a proper instruction)
+
+  ## Output Format
+
+  Return exactly 5-10 fields. Each field needs:
+  - name: snake_case identifier (e.g., "capacity_liters")
+  - prompt: Detailed extraction instructions
+  - data_type: One of "string", "number", "boolean"
+  - rationale: Brief explanation of why this field is important for comparison
+
+# User prompt template
+user_prompt_template: |
+  Generate comparison fields for: **{product_type}**
+
+  ## User Requirements
+  - Must-have features: {must_haves}
+  - Nice-to-have features: {nice_to_haves}
+  - Budget: {budget_constraint}
+  - Priorities: {priorities}
+
+  ## Instructions
+  Generate 5-10 category-specific comparison fields that:
+  1. Cover the key specs buyers compare for this product type
+  2. Address the user's specific must-have and nice-to-have requirements
+  3. Include fields relevant to the user's priorities
+  4. Are commonly found on product pages and review sites
+
+  For each field, provide:
+  - A specific, snake_case name (include units where applicable)
+  - A detailed extraction prompt with format, synonyms, and fallback instructions
+  - The appropriate data type
+  - A brief rationale for why this field matters
+
+  Focus on specs that genuinely differentiate products in this category.
+  Do NOT include generic fields like name, price, or rating (those are handled separately).
+
+# Fallback field templates for common categories
+# Used when LLM generation fails
+fallback_templates:
+  electronics:
+    - name: "power_watts"
+      prompt: "Extract the power consumption or wattage in watts. Look for 'W', 'watts', 'power consumption'."
+      data_type: "number"
+    - name: "dimensions_cm"
+      prompt: "Extract the product dimensions in centimeters (L x W x H). Format as 'LxWxH cm'."
+      data_type: "string"
+    - name: "weight_kg"
+      prompt: "Extract the product weight in kilograms. Convert from grams or pounds if needed."
+      data_type: "number"
+    - name: "warranty_years"
+      prompt: "Extract the warranty duration in years. Convert months to years if needed."
+      data_type: "number"
+    - name: "energy_rating"
+      prompt: "Extract the energy efficiency rating (e.g., A+++, A++, A+, A, B, C, D)."
+      data_type: "string"
+
+  appliances:
+    - name: "capacity"
+      prompt: "Extract the product capacity with units (liters, kg, cubic feet, etc.)."
+      data_type: "string"
+    - name: "power_watts"
+      prompt: "Extract the power consumption in watts."
+      data_type: "number"
+    - name: "noise_level_db"
+      prompt: "Extract the noise level in decibels (dB). Look for 'noise', 'sound level', 'dB'."
+      data_type: "number"
+    - name: "programs_count"
+      prompt: "Extract the number of programs, modes, or settings available."
+      data_type: "number"
+    - name: "energy_rating"
+      prompt: "Extract the energy efficiency rating."
+      data_type: "string"
+
+  default:
+    - name: "key_feature_1"
+      prompt: "Extract the primary distinguishing feature of this product."
+      data_type: "string"
+    - name: "key_feature_2"
+      prompt: "Extract the secondary distinguishing feature of this product."
+      data_type: "string"
+    - name: "material"
+      prompt: "Extract the primary material or build quality information."
+      data_type: "string"
+    - name: "warranty_years"
+      prompt: "Extract the warranty duration in years."
+      data_type: "number"
+    - name: "country_of_origin"
+      prompt: "Extract where the product is manufactured or the brand's country of origin."
+      data_type: "string"
+
+# Validation rules
+validation:
+  min_fields: 5
+  max_fields: 10
+  required_data_types:
+    - string
+    - number
+  name_pattern: "^[a-z][a-z0-9_]*$"  # snake_case
