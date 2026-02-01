@@ -17,7 +17,7 @@ class AgentState(TypedDict, total=False):
 
     The state is divided into logical sections:
     - Message history (with LangGraph's add_messages reducer)
-    - Workflow control (phase, current node)
+    - Workflow control (current node, current phase)
     - User context (identifiers, metadata)
     - Domain-specific fields (add your own)
 
@@ -25,7 +25,7 @@ class AgentState(TypedDict, total=False):
         state = AgentState(
             messages=[HumanMessage(content="Hello")],
             user_id="user123",
-            phase="start",
+            current_phase="intake",
         )
     """
 
@@ -38,9 +38,6 @@ class AgentState(TypedDict, total=False):
     # =========================================================================
     # Workflow Control
     # =========================================================================
-    # Current phase of the workflow
-    phase: str  # start, processing, complete, error
-
     # Current node being executed
     current_node: str
 
@@ -99,10 +96,6 @@ class AgentState(TypedDict, total=False):
     # Living comparison table - single source of truth for product data
     # This is a serialized ComparisonTable Pydantic model
     living_table: dict[str, Any] | None
-
-    # DEPRECATED: Legacy comparison table, kept for migration
-    # Use living_table instead
-    comparison_table: dict[str, Any] | None
 
     # Refinement history
     refinement_history: list[dict[str, Any]]
@@ -167,7 +160,6 @@ def create_initial_state(
 
     return AgentState(
         messages=[],
-        phase="start",
         current_node="intake",
         user_id=user_id,
         session_id=session_id,
@@ -185,7 +177,6 @@ def create_initial_state(
         user_requirements=None,
         candidates=[],
         living_table=None,
-        comparison_table=None,  # DEPRECATED: kept for migration
         refinement_history=[],
         need_new_search=False,
         new_fields_to_add=[],

@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from app.config import Settings, get_settings
 from app.utils.logger import get_logger
+from app.utils.retry import openai_retry
 
 logger = get_logger(__name__)
 
@@ -287,7 +288,7 @@ class LLMService:
             if previous_response_id:
                 request_kwargs["previous_response_id"] = previous_response_id
 
-            response = await client.responses.create(**request_kwargs)
+            response = await self._call_openai_responses_api(client, request_kwargs)
 
             response_time = time.perf_counter() - start_time
 
@@ -352,6 +353,11 @@ class LLMService:
             logger.error(f"Web search generation error: {e}")
             raise
 
+    @openai_retry
+    async def _call_openai_responses_api(self, client, request_kwargs: dict):
+        """Call OpenAI Responses API with retry logic for transient failures."""
+        return await client.responses.create(**request_kwargs)
+
 
 class MockLLMClient:
     """Mock LLM client for testing."""
@@ -374,9 +380,10 @@ def get_llm_service() -> LLMService:
     return LLMService(get_settings())
 
 
+@lru_cache
 def get_intake_llm_service() -> LLMService:
     """
-    Get LLM service configured for intake requirement extraction.
+    Get cached LLM service configured for intake requirement extraction.
 
     Uses GPT-4.1 for better understanding of nuanced requirements
     like condition (second hand), year ranges, and specifications.
@@ -387,17 +394,16 @@ def get_intake_llm_service() -> LLMService:
     service = LLMService(settings)
     service.model = settings.intake_model
     service.temperature = settings.intake_temperature
-
-    # Recreate client with new model
-    service._client = None  # Reset to force lazy reload
+    service._client = None  # Reset to force lazy reload with new model
 
     logger.info(f"Intake LLM service: {service.provider}/{service.model}")
     return service
 
 
+@lru_cache
 def get_intake_chat_llm_service() -> LLMService:
     """
-    Get LLM service configured for intake chat responses.
+    Get cached LLM service configured for intake chat responses.
 
     Uses GPT-4.1-mini for fast, snappy conversational responses.
     Separate from requirement extraction which uses the full GPT-4.1.
@@ -408,9 +414,7 @@ def get_intake_chat_llm_service() -> LLMService:
     service = LLMService(settings)
     service.model = settings.intake_chat_model
     service.temperature = settings.intake_chat_temperature
-
-    # Recreate client with new model
-    service._client = None  # Reset to force lazy reload
+    service._client = None  # Reset to force lazy reload with new model
 
     logger.info(f"Intake chat LLM service: {service.provider}/{service.model}")
     return service

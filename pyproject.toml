@@ -41,6 +41,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "httpx>=0.28.0",
     "pandas>=2.0.0",
+    "tenacity>=8.2.0,<9.0.0",
 
     # Lattice enrichment (git submodule - installed via uv pip install -e)
     # Run: uv pip install -e ./vendor/lattice

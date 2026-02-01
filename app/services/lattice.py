@@ -2,6 +2,7 @@
 
 import csv
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -294,3 +295,9 @@ class LatticeService:
         if self._temp_csv_path and self._temp_csv_path.exists():
             self._temp_csv_path.unlink()
             self._temp_csv_path = None
+
+
+@lru_cache
+def get_lattice_service() -> LatticeService:
+    """Get cached LatticeService instance."""
+    return LatticeService()

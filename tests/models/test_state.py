@@ -12,7 +12,7 @@ def test_create_initial_state():
 
     assert state["user_id"] == "test-user"
     assert state["session_id"] == "test-session"
-    assert state["phase"] == "start"
+    assert state["current_phase"] == "intake"
 
 
 def test_create_initial_state_has_web_search_fields():

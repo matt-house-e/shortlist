@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.models.schemas.shortlist import ComparisonTable
 from app.models.state import AgentState
 from app.services.llm import get_llm_service
+from app.utils.hitl import clear_hitl_flags, parse_hitl_choice
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -84,42 +85,6 @@ def _get_intent_description(intent_type: str, extracted_fields: list[str] | None
     return descriptions.get(intent_type, "I'll help you with that.")
 
 
-def _parse_hitl_choice(content: str) -> str | None:
-    """
-    Parse the choice from a HITL message.
-
-    Args:
-        content: Message content like "[HITL:intent:Yes, proceed]"
-
-    Returns:
-        The choice string or None if invalid
-    """
-    if not content.startswith("[HITL:"):
-        return None
-    try:
-        inner = content[6:-1]  # Remove [HITL: and ]
-        parts = inner.split(":", 1)
-        if len(parts) == 2:
-            return parts[1]
-    except Exception:
-        pass
-    return None
-
-
-def _clear_hitl_flags() -> dict:
-    """Return a dict of cleared HITL flags for state updates."""
-    return {
-        "awaiting_requirements_confirmation": False,
-        "awaiting_fields_confirmation": False,
-        "awaiting_intent_confirmation": False,
-        "action_choices": None,
-        "pending_requirements_summary": None,
-        "pending_field_definitions": None,
-        "pending_intent": None,
-        "pending_intent_details": None,
-    }
-
-
 async def _execute_confirmed_intent(
     state: AgentState,
     pending_intent: str,
@@ -146,7 +111,7 @@ async def _execute_confirmed_intent(
                 "current_phase": "research",
                 "need_new_search": True,
                 "advise_has_presented": False,
-                **_clear_hitl_flags(),
+                **clear_hitl_flags(),
             },
             goto="research",
         )
@@ -164,7 +129,7 @@ async def _execute_confirmed_intent(
                 "need_new_search": False,
                 "advise_has_presented": False,
                 "requested_fields": extracted_fields,
-                **_clear_hitl_flags(),
+                **clear_hitl_flags(),
             },
             goto="research",
         )
@@ -179,7 +144,7 @@ async def _execute_confirmed_intent(
                 "current_node": "advise",
                 "current_phase": "intake",
                 "advise_has_presented": False,
-                **_clear_hitl_flags(),
+                **clear_hitl_flags(),
             },
             goto="intake",
         )
@@ -192,7 +157,7 @@ async def _execute_confirmed_intent(
                 ],
                 "current_node": "advise",
                 "current_phase": "advise",
-                **_clear_hitl_flags(),
+                **clear_hitl_flags(),
             },
             goto="__end__",
         )
@@ -221,7 +186,6 @@ async def advise_node(state: AgentState) -> Command:
     logger.info("ADVISE node processing")
 
     messages = state.get("messages", [])
-    comparison_table = state.get("comparison_table")
     requirements = state.get("user_requirements", {})
     has_presented = state.get("advise_has_presented", False)
     awaiting_intent = state.get("awaiting_intent_confirmation", False)
@@ -230,7 +194,7 @@ async def advise_node(state: AgentState) -> Command:
     if messages:
         last_message = messages[-1]
         if hasattr(last_message, "content") and last_message.content.startswith("[HITL:intent:"):
-            choice = _parse_hitl_choice(last_message.content)
+            choice = parse_hitl_choice(last_message.content)
             logger.info(f"ADVISE: HITL action received - {choice}")
 
             pending_intent = state.get("pending_intent")
@@ -251,7 +215,7 @@ async def advise_node(state: AgentState) -> Command:
                         ],
                         "current_node": "advise",
                         "current_phase": "advise",
-                        **_clear_hitl_flags(),
+                        **clear_hitl_flags(),
                     },
                     goto="__end__",
                 )
@@ -311,21 +275,6 @@ async def advise_node(state: AgentState) -> Command:
             markdown_table = living_table.to_markdown(max_rows=5)
             table_context += f"\n\nTable Preview (top 5):\n{markdown_table}"
 
-        elif comparison_table and comparison_table.get("candidates"):
-            # Fall back to legacy comparison_table
-            candidates = comparison_table.get("candidates", [])
-            fields = comparison_table.get("fields", [])
-
-            # Include top 5 candidates with key fields
-            top_candidates = candidates[:5]
-            table_data = {
-                "total_candidates": len(candidates),
-                "fields": fields,
-                "top_5_products": top_candidates,
-            }
-
-            table_context = f"\n\nComparison Table Data:\n{json.dumps(table_data, indent=2, ensure_ascii=False)}"
-
         # Add requirements context
         requirements_context = ""
         if requirements:
@@ -351,7 +300,7 @@ async def advise_node(state: AgentState) -> Command:
                     "current_node": "advise",
                     "current_phase": "advise",
                     "advise_has_presented": True,
-                    **_clear_hitl_flags(),
+                    **clear_hitl_flags(),
                 },
                 goto="__end__",  # Wait for user input
             )
@@ -382,7 +331,7 @@ async def advise_node(state: AgentState) -> Command:
                     "messages": [AIMessage(content=llm_response.content)],
                     "current_node": "advise",
                     "current_phase": "advise",
-                    **_clear_hitl_flags(),
+                    **clear_hitl_flags(),
                 },
                 goto="__end__",
             )
@@ -455,7 +404,7 @@ What is their primary intent?"""
                     "messages": [AIMessage(content=llm_response.content)],
                     "current_node": "advise",
                     "current_phase": "complete",
-                    **_clear_hitl_flags(),
+                    **clear_hitl_flags(),
                 },
                 goto="__end__",
             )
@@ -473,7 +422,7 @@ What is their primary intent?"""
                     "messages": [AIMessage(content=llm_response.content)],
                     "current_node": "advise",
                     "current_phase": "advise",
-                    **_clear_hitl_flags(),
+                    **clear_hitl_flags(),
                 },
                 goto="__end__",
             )
@@ -485,7 +434,7 @@ What is their primary intent?"""
                 "messages": [AIMessage(content="I encountered an error processing your request.")],
                 "current_node": "advise",
                 "current_phase": "error",
-                **_clear_hitl_flags(),
+                **clear_hitl_flags(),
             },
             goto="__end__",
         )

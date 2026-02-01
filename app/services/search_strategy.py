@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -319,13 +320,7 @@ class SearchStrategyService:
         )
 
 
-# Module-level instance for convenience
-_service_instance = None
-
-
+@lru_cache
 def get_search_strategy_service() -> SearchStrategyService:
-    """Get or create the search strategy service instance."""
-    global _service_instance
-    if _service_instance is None:
-        _service_instance = SearchStrategyService()
-    return _service_instance
+    """Get cached SearchStrategyService instance."""
+    return SearchStrategyService()
