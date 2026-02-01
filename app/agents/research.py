@@ -472,16 +472,6 @@ async def generate_field_definitions(
         },
         {
             "category": "standard",
-            "name": "rating",
-            "prompt": (
-                "Extract the average customer rating. "
-                "Look for star ratings, scores, or review averages. "
-                "Format as 'X.X/5' or 'X/10'. If percentage, convert to /5 scale."
-            ),
-            "data_type": "string",
-        },
-        {
-            "category": "standard",
             "name": "official_url",
             "prompt": (
                 "Select the official product page URL from the 'Source:' URLs provided in the search results. "
@@ -950,6 +940,11 @@ async def enrich_living_table(table: ComparisonTable) -> ComparisonTable:
     return table
 
 
+def _format_field_name(name: str) -> str:
+    """Convert field_name_like_this to 'Field Name Like This'."""
+    return name.replace("_", " ").title()
+
+
 def _format_fields_for_display(field_definitions: list[dict]) -> str:
     """
     Format field definitions for user display in HITL confirmation.
@@ -958,12 +953,12 @@ def _format_fields_for_display(field_definitions: list[dict]) -> str:
         field_definitions: List of field definition dicts
 
     Returns:
-        Formatted string for display
+        Formatted string for display with rich markdown
     """
     # Group by category
-    standard = []
-    category_specific = []
-    user_driven = []
+    basics = []  # standard fields like name, price, official_url
+    specs = []  # category-specific technical specs
+    priorities = []  # user-driven based on their requirements
 
     for field in field_definitions:
         name = field.get("name", "unknown")
@@ -973,22 +968,32 @@ def _format_fields_for_display(field_definitions: list[dict]) -> str:
         if cat == "qualification":
             continue
 
+        display_name = _format_field_name(name)
+
         if cat == "standard":
-            standard.append(name)
+            basics.append(display_name)
         elif cat == "category":
-            category_specific.append(name)
+            specs.append(display_name)
         else:
-            user_driven.append(name)
+            priorities.append(display_name)
 
-    parts = []
-    if standard:
-        parts.append(f"**Standard fields:** {', '.join(standard)}")
-    if category_specific:
-        parts.append(f"**Category-specific:** {', '.join(category_specific)}")
-    if user_driven:
-        parts.append(f"**Based on your priorities:** {', '.join(user_driven)}")
+    lines = []
 
-    return "\n".join(parts) if parts else "Standard comparison fields"
+    if basics:
+        lines.append("**Basics:** " + ", ".join(basics))
+
+    if specs:
+        # Format specs as a bullet list for readability
+        lines.append("\n**Specs I'll research:**")
+        for spec in specs:
+            lines.append(f"- {spec}")
+
+    if priorities:
+        lines.append("\n**Based on your priorities:**")
+        for priority in priorities:
+            lines.append(f"- {priority}")
+
+    return "\n".join(lines) if lines else "Standard comparison fields"
 
 
 def _parse_hitl_choice(content: str) -> str | None:
@@ -1325,9 +1330,7 @@ async def research_node(state: AgentState) -> Command:
             # After Explorer completes, pause for HITL confirmation
             fields_summary = _format_fields_for_display(field_definitions)
             confirmation_message = (
-                f"Found {len(candidates)} products!\n\n"
-                f"I'll compare them on:\n{fields_summary}\n\n"
-                f"Ready to analyze these products?"
+                f"🔍 **Found {len(candidates)} products!**\n\n{fields_summary}\n\nReady to analyze?"
             )
 
             logger.info("RESEARCH: Explorer complete, awaiting HITL confirmation for fields")

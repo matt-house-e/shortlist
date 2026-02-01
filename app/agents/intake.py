@@ -8,7 +8,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from app.models.state import AgentState
-from app.services.llm import get_intake_llm_service, get_llm_service
+from app.services.llm import get_intake_chat_llm_service, get_intake_llm_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -223,8 +223,8 @@ async def intake_node(state: AgentState) -> Command:
     try:
         # Use GPT-4.1 for requirement extraction (better at nuanced understanding)
         intake_llm = get_intake_llm_service()
-        # Keep standard LLM for conversational responses
-        llm_service = get_llm_service()
+        # Use GPT-4.1-mini for fast, snappy conversational responses
+        chat_llm = get_intake_chat_llm_service()
 
         # Step 1: Extract requirements from conversation using structured output
         requirements_prompt = """Based on the entire conversation so far, extract the user's product requirements.
@@ -276,7 +276,7 @@ Be a knowledgeable consultant—proactively helpful, not just reactive. Don't as
         decision_messages = messages.copy()
         decision_messages.append(HumanMessage(content=decision_prompt))
 
-        decision = await llm_service.generate_structured(
+        decision = await chat_llm.generate_structured(
             decision_messages,
             schema=IntakeDecision,
             system_prompt=INTAKE_SYSTEM_PROMPT,

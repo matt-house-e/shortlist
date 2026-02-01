@@ -24,9 +24,13 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_temperature: float = 0.7
 
-    # Intake-specific model (GPT-4.1 for better requirement extraction)
+    # Intake-specific models
+    # GPT-4.1 for requirement extraction (better nuanced understanding)
     intake_model: str = "gpt-4.1"
     intake_temperature: float = 0.3
+    # GPT-4.1-mini for conversational chat (fast, snappy responses)
+    intake_chat_model: str = "gpt-4.1-mini"
+    intake_chat_temperature: float = 0.7
 
     # -------------------------------------------------------------------------
     # Research Configuration

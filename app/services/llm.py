@@ -393,3 +393,24 @@ def get_intake_llm_service() -> LLMService:
 
     logger.info(f"Intake LLM service: {service.provider}/{service.model}")
     return service
+
+
+def get_intake_chat_llm_service() -> LLMService:
+    """
+    Get LLM service configured for intake chat responses.
+
+    Uses GPT-4.1-mini for fast, snappy conversational responses.
+    Separate from requirement extraction which uses the full GPT-4.1.
+    """
+    settings = get_settings()
+
+    # Create a custom service with intake chat model
+    service = LLMService(settings)
+    service.model = settings.intake_chat_model
+    service.temperature = settings.intake_chat_temperature
+
+    # Recreate client with new model
+    service._client = None  # Reset to force lazy reload
+
+    logger.info(f"Intake chat LLM service: {service.provider}/{service.model}")
+    return service
