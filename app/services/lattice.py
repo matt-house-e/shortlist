@@ -7,9 +7,9 @@ from typing import Any
 
 import pandas as pd
 from lattice import EnrichmentConfig, FieldManager, TableEnricher
-from lattice.chains import WebEnrichedLLMChain
 
 from app.config.settings import get_settings
+from app.services.openai_enrichment_chain import OpenAIWebSearchChain
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -78,22 +78,23 @@ class LatticeService:
     """
     Service for bulk enrichment of product candidates using Lattice.
 
-    Uses WebEnrichedLLMChain with Tavily for real-time web data.
+    Uses OpenAI web search for real-time web data.
     """
 
     CATEGORY_NAME = "shortlist_enrichment"
 
     def __init__(self):
-        """Initialize LatticeService with WebEnrichedLLMChain."""
+        """Initialize LatticeService with OpenAI web search chain."""
         settings = get_settings()
 
-        # Create WebEnrichedLLMChain (with Tavily web search)
-        self.chain = WebEnrichedLLMChain.create(
+        # Create OpenAI web search chain for enrichment
+        self.chain = OpenAIWebSearchChain.create(
             api_key=settings.openai_api_key,
-            tavily_api_key=settings.tavily_api_key,
             model=settings.lattice_model,
             temperature=settings.lattice_temperature,
             max_tokens=settings.lattice_max_tokens,
+            reasoning_effort=settings.lattice_reasoning_effort,
+            use_reasoning=settings.lattice_use_reasoning,
         )
 
         # Create enrichment config
@@ -112,7 +113,7 @@ class LatticeService:
 
         self._temp_csv_path: Path | None = None
 
-        logger.info("LatticeService initialized with WebEnrichedLLMChain")
+        logger.info("LatticeService initialized with OpenAI web search chain")
 
     def prepare_field_definitions(
         self,

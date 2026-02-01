@@ -9,8 +9,16 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 
 from app.config.settings import get_settings
-from app.models.schemas.shortlist import SearchQuery, SearchQueryPlan
+from app.models.schemas.shortlist import (
+    Candidate,
+    CellStatus,
+    ComparisonTable,
+    FieldDefinition,
+    SearchQuery,
+    SearchQueryPlan,
+)
 from app.models.state import AgentState
+from app.services.field_generation import get_field_generation_service
 from app.services.lattice import LatticeService
 from app.services.llm import LLMService
 from app.services.search_strategy import get_search_strategy_service
@@ -62,9 +70,13 @@ def _summarize_requirements(requirements: dict) -> str:
     if priorities:
         parts.append(f"Priorities: {', '.join(priorities)}")
 
+    specifications = requirements.get("specifications", [])
+    if specifications:
+        parts.append(f"Specifications: {', '.join(specifications)}")
+
     constraints = requirements.get("constraints", [])
     if constraints:
-        parts.append(f"Constraints: {', '.join(constraints)}")
+        parts.append(f"Avoid: {', '.join(constraints)}")
 
     return "; ".join(parts)
 
@@ -145,17 +157,87 @@ async def _generate_search_queries(
         )
 
 
-def _extract_candidates_from_response(response_content: str) -> list[dict]:
+def _match_citation_to_product(
+    product_name: str,
+    manufacturer: str,
+    citations: list,
+) -> str | None:
+    """
+    Find the best matching citation URL for a product.
+
+    Args:
+        product_name: Full product name
+        manufacturer: Brand/manufacturer name
+        citations: List of Citation objects with url and title
+
+    Returns:
+        Best matching URL or None
+    """
+    if not citations:
+        return None
+
+    # Normalize for matching
+    name_lower = product_name.lower()
+    mfr_lower = manufacturer.lower() if manufacturer else ""
+
+    # Extract key terms from product name (first few words, model numbers)
+    name_terms = [t for t in name_lower.split()[:4] if len(t) > 2]
+
+    best_match = None
+    best_score = 0
+
+    for citation in citations:
+        url_lower = citation.url.lower()
+        title_lower = (citation.title or "").lower()
+
+        score = 0
+
+        # Check manufacturer in URL or title (strong signal)
+        if mfr_lower and len(mfr_lower) > 2:
+            if mfr_lower in url_lower:
+                score += 3
+            if mfr_lower in title_lower:
+                score += 2
+
+        # Check product name terms
+        for term in name_terms:
+            if term in url_lower:
+                score += 1
+            if term in title_lower:
+                score += 1
+
+        # Prefer manufacturer domains over retailers
+        retailer_domains = ["amazon", "bestbuy", "walmart", "target", "ebay", "newegg"]
+        is_retailer = any(r in url_lower for r in retailer_domains)
+        if is_retailer:
+            score -= 1  # Slight penalty for retailers
+
+        if score > best_score:
+            best_score = score
+            best_match = citation.url
+
+    # Only return if we have a reasonable match (at least manufacturer matched)
+    return best_match if best_score >= 2 else None
+
+
+def _extract_candidates_from_response(
+    response_content: str,
+    citations: list | None = None,
+) -> list[dict]:
     """
     Extract product candidates from web search response.
 
+    Uses real URLs from citations instead of LLM-hallucinated URLs.
+
     Args:
         response_content: Raw response content from web search
+        citations: List of Citation objects from web search (with real URLs)
 
     Returns:
         List of candidate dicts
     """
     candidates = []
+    citations = citations or []
 
     # Try to extract JSON array from response
     try:
@@ -173,11 +255,29 @@ def _extract_candidates_from_response(response_content: str) -> list[dict]:
             if isinstance(parsed, list):
                 for item in parsed:
                     if isinstance(item, dict) and "name" in item:
+                        name = item.get("name", "")
+                        manufacturer = item.get("manufacturer", "Unknown")
+
+                        # Match citation URL instead of using hallucinated URL
+                        matched_url = _match_citation_to_product(name, manufacturer, citations)
+
+                        # Log when we replace a hallucinated URL
+                        hallucinated_url = item.get("official_url")
+                        if hallucinated_url and matched_url:
+                            logger.debug(
+                                f"Replaced hallucinated URL for {name}: "
+                                f"{hallucinated_url} -> {matched_url}"
+                            )
+                        elif hallucinated_url and not matched_url:
+                            logger.debug(
+                                f"No citation match for {name}, discarding hallucinated URL"
+                            )
+
                         candidates.append(
                             {
-                                "name": item.get("name", ""),
-                                "manufacturer": item.get("manufacturer", "Unknown"),
-                                "official_url": item.get("official_url"),
+                                "name": name,
+                                "manufacturer": manufacturer,
+                                "official_url": matched_url,  # Use real URL from citations
                                 "description": item.get("description", ""),
                             }
                         )
@@ -240,21 +340,20 @@ SEARCH_SYSTEM_PROMPT = """You are a product researcher. Search for products matc
 For each product found, extract:
 - Full product name (be specific, include model numbers)
 - Manufacturer/brand
-- Official product URL (manufacturer site preferred, not retailer)
 - Brief description
 
 Return results as a JSON array:
 [
-    {"name": "Product Name Model X123", "manufacturer": "Brand", "official_url": "https://...", "description": "Brief description"},
+    {"name": "Product Name Model X123", "manufacturer": "Brand", "description": "Brief description"},
     ...
 ]
 
 IMPORTANT:
 - Find 8-15 DISTINCT products per search
 - Include model numbers/variants when available
-- Prioritize manufacturer URLs over retailer URLs
 - Include a mix of popular and lesser-known options
-- Don't repeat the same product with different names"""
+- Don't repeat the same product with different names
+- Do NOT include URLs - they will be extracted from citations automatically"""
 
 
 async def _execute_parallel_searches(
@@ -288,7 +387,8 @@ async def _execute_parallel_searches(
                 system_prompt=SEARCH_SYSTEM_PROMPT,
             )
 
-            candidates = _extract_candidates_from_response(response.content)
+            # Pass citations to extract real URLs instead of hallucinated ones
+            candidates = _extract_candidates_from_response(response.content, response.citations)
 
             # Log with angle and count
             logger.info(
@@ -328,49 +428,69 @@ async def _execute_parallel_searches(
     return all_candidates
 
 
-def generate_field_definitions(product_type: str, requirements: dict) -> list[dict]:
+async def generate_field_definitions(
+    product_type: str,
+    requirements: dict,
+    llm_service: LLMService,
+) -> list[dict]:
     """
     Generate field definitions based on product category and user requirements.
 
-    The LLM determines appropriate category-specific fields based on its knowledge
+    Uses LLM to determine appropriate category-specific fields based on its knowledge
     of the product type. Standard fields and qualification fields are always included.
 
     Args:
         product_type: Type of product (e.g., "electric kettle", "laptop")
         requirements: User requirements dict
+        llm_service: LLM service for generating category-specific fields
 
     Returns:
-        List of field definition dicts
+        List of field definition dicts (11-16 total: 4 standard + 5-10 category + 2 qualification)
     """
     logger.info(f"Generating field definitions for {product_type}")
 
-    # Standard fields for all products
+    # Standard fields for all products - with improved extraction prompts
     fields = [
         {
             "category": "standard",
             "name": "name",
-            "prompt": "Extract the product name",
+            "prompt": (
+                "Extract the full product name including brand and model number. "
+                "Look for the official product title. Format: 'Brand Model Name'."
+            ),
             "data_type": "string",
         },
         {
             "category": "standard",
             "name": "price",
-            "prompt": "Extract the product price",
-            "data_type": "string",
-        },
-        {
-            "category": "standard",
-            "name": "rating",
-            "prompt": "Extract the average customer rating",
+            "prompt": (
+                "Extract the current retail price with currency symbol. "
+                "Use the main price, not sale/discount price. "
+                "If a range is given, use the starting price. Format: '$XX.XX' or '£XX.XX'."
+            ),
             "data_type": "string",
         },
         {
             "category": "standard",
             "name": "official_url",
-            "prompt": "Extract the official product URL",
+            "prompt": (
+                "Select the official product page URL from the 'Source:' URLs provided in the search results. "
+                "ONLY use URLs that appear in the source context - NEVER generate or guess URLs. "
+                "Prefer manufacturer URLs over retailer URLs (Amazon, Best Buy, etc.). "
+                "If no suitable URL is found in the sources, return null."
+            ),
             "data_type": "string",
         },
     ]
+
+    # Generate category-specific fields using LLM
+    logger.info("Generating category-specific fields via LLM...")
+    field_service = get_field_generation_service()
+    category_fields = await field_service.generate_fields(requirements, llm_service)
+
+    # Add category-specific fields
+    fields.extend(category_fields)
+    logger.info(f"Added {len(category_fields)} category-specific fields")
 
     # Add qualification fields for requirement matching
     requirements_summary = _summarize_requirements(requirements)
@@ -379,7 +499,11 @@ def generate_field_definitions(product_type: str, requirements: dict) -> list[di
         {
             "category": "qualification",
             "name": "meets_requirements",
-            "prompt": f"Does this product meet ALL these requirements: {requirements_summary}? Answer TRUE or FALSE only.",
+            "prompt": (
+                f"Does this product meet ALL these requirements: {requirements_summary}? "
+                "Carefully check each requirement against the product specs. "
+                "Answer TRUE only if ALL requirements are met. Answer FALSE if any requirement is not met or unclear."
+            ),
             "data_type": "boolean",
         }
     )
@@ -388,13 +512,139 @@ def generate_field_definitions(product_type: str, requirements: dict) -> list[di
         {
             "category": "qualification",
             "name": "requirement_fit_notes",
-            "prompt": f"Which of these requirements does this product meet or not meet: {requirements_summary}",
+            "prompt": (
+                f"For each of these requirements: {requirements_summary} - "
+                "indicate which are MET, NOT MET, or UNCLEAR. "
+                "Be specific about why each requirement is or isn't satisfied."
+            ),
             "data_type": "string",
         }
     )
 
-    logger.info(f"Generated {len(fields)} field definitions")
+    logger.info(f"Generated {len(fields)} total field definitions")
     return fields
+
+
+def _get_or_create_living_table(state: AgentState) -> ComparisonTable:
+    """
+    Get existing living table from state or create a new one.
+
+    Args:
+        state: Current workflow state
+
+    Returns:
+        ComparisonTable instance
+    """
+    living_table_data = state.get("living_table")
+    if living_table_data:
+        return ComparisonTable.model_validate(living_table_data)
+    return ComparisonTable()
+
+
+def _add_candidates_to_table(
+    table: ComparisonTable,
+    candidates: list[dict],
+) -> tuple[int, int]:
+    """
+    Add candidates to the living table with deduplication.
+
+    Args:
+        table: ComparisonTable instance
+        candidates: List of candidate dicts from explorer
+
+    Returns:
+        Tuple of (added_count, duplicate_count)
+    """
+    added = 0
+    duplicates = 0
+
+    for candidate_dict in candidates:
+        # Convert dict to Candidate model
+        candidate = Candidate(
+            name=candidate_dict.get("name", "Unknown"),
+            manufacturer=candidate_dict.get("manufacturer", "Unknown"),
+            official_url=candidate_dict.get("official_url"),
+            description=candidate_dict.get("description"),
+            category=candidate_dict.get("category"),
+        )
+
+        # Try to add (returns None if duplicate)
+        row_id = table.add_row(
+            candidate=candidate,
+            source_query=candidate_dict.get("source_query"),
+        )
+
+        if row_id:
+            added += 1
+        else:
+            duplicates += 1
+
+    logger.info(f"Added {added} candidates to table, {duplicates} duplicates skipped")
+    return added, duplicates
+
+
+def _add_requested_fields_to_table(
+    table: ComparisonTable,
+    requested_fields: list[str],
+) -> list[str]:
+    """
+    Add user-requested fields to the table.
+
+    Creates FieldDefinition for each requested field name and adds it to the table.
+    This marks all existing rows as PENDING for the new fields.
+
+    Args:
+        table: ComparisonTable instance
+        requested_fields: List of field names requested by user
+
+    Returns:
+        List of field names that were actually added (not already present)
+    """
+    added_fields = []
+
+    for field_name in requested_fields:
+        # Check if field already exists
+        existing_names = {f.name for f in table.fields}
+        if field_name in existing_names:
+            logger.debug(f"Field '{field_name}' already exists, skipping")
+            continue
+
+        # Create field definition for user-requested field
+        field_def = FieldDefinition(
+            name=field_name,
+            prompt=f"Extract or determine the {field_name} for this product",
+            data_type="string",
+            category="user_driven",
+        )
+
+        table.add_field(field_def)
+        added_fields.append(field_name)
+        logger.info(f"Added user-requested field: {field_name}")
+
+    return added_fields
+
+
+def _build_field_definitions_list(table: ComparisonTable) -> list[dict]:
+    """
+    Convert table's FieldDefinition objects to dict list for Lattice.
+
+    Args:
+        table: ComparisonTable instance
+
+    Returns:
+        List of field definition dicts
+    """
+    return [
+        {
+            "category": str(f.category.value) if hasattr(f.category, "value") else str(f.category),
+            "name": f.name,
+            "prompt": f.prompt,
+            "data_type": str(f.data_type.value)
+            if hasattr(f.data_type, "value")
+            else str(f.data_type),
+        }
+        for f in table.fields
+    ]
 
 
 async def explorer_step(state: AgentState) -> tuple[list[dict], list[dict]]:
@@ -463,16 +713,29 @@ async def explorer_step(state: AgentState) -> tuple[list[dict], list[dict]]:
     dedup_rate = (1 - len(candidates) / max(len(raw_candidates), 1)) * 100
     logger.info(f"Unique candidates: {len(candidates)} (removed {dedup_rate:.1f}% duplicates)")
 
+    # Apply max_products limit from settings
+    settings = get_settings()
+    max_products = settings.max_products
+    if len(candidates) > max_products:
+        logger.info(
+            f"Limiting candidates from {len(candidates)} to {max_products} (max_products setting)"
+        )
+        candidates = candidates[:max_products]
+
     # Log brand diversity
     brands = {c.get("manufacturer", "Unknown") for c in candidates}
     logger.info(f"Brand diversity: {len(brands)} unique brands")
 
-    # Warn if fewer than expected
-    if len(candidates) < 20:
-        logger.warning(f"Only {len(candidates)} candidates found (target: 40+)")
+    # Warn if fewer than expected minimum
+    if len(candidates) < 10:
+        logger.warning(f"Only {len(candidates)} candidates found (expected at least 10)")
 
-    # Generate field definitions (including qualification fields)
-    field_definitions = generate_field_definitions(product_type, requirements)
+    # Generate field definitions (including category-specific and qualification fields)
+    logger.info("-" * 40)
+    logger.info("Phase 4: Generating category-specific field definitions")
+    logger.info("-" * 40)
+
+    field_definitions = await generate_field_definitions(product_type, requirements, llm_service)
 
     logger.info("=" * 60)
     logger.info(f"Explorer complete: {len(candidates)} candidates, {len(field_definitions)} fields")
@@ -504,6 +767,8 @@ async def enricher_step(
 ) -> dict:
     """
     Enricher sub-step - Build comparison table via Lattice enrichment with qualification filtering.
+
+    DEPRECATED: Use enrich_living_table() for incremental enrichment.
 
     Args:
         candidates: List of product candidates
@@ -565,6 +830,121 @@ async def enricher_step(
     return comparison_table
 
 
+async def enrich_living_table(table: ComparisonTable) -> ComparisonTable:
+    """
+    Enrich PENDING cells in the living table via Lattice.
+
+    Only enriches cells with PENDING or FLAGGED status, making this efficient
+    for incremental updates (adding new fields or new rows).
+
+    Args:
+        table: ComparisonTable with cells to enrich
+
+    Returns:
+        Updated ComparisonTable with enriched cells
+    """
+    pending_cells = table.get_pending_cells()
+
+    if not pending_cells:
+        logger.info("No pending cells to enrich")
+        return table
+
+    logger.info(f"Enriching {len(pending_cells)} pending cells")
+
+    # Group pending cells by row for batch processing
+    rows_to_enrich: dict[str, list[str]] = {}
+    for row_id, field_name in pending_cells:
+        if row_id not in rows_to_enrich:
+            rows_to_enrich[row_id] = []
+        rows_to_enrich[row_id].append(field_name)
+
+    # Prepare candidates for Lattice (need full candidate data)
+    candidates_for_lattice = []
+    row_id_to_index: dict[str, int] = {}
+
+    for idx, row_id in enumerate(rows_to_enrich.keys()):
+        row = table.rows[row_id]
+        candidates_for_lattice.append(
+            {
+                "name": row.candidate.name,
+                "manufacturer": row.candidate.manufacturer,
+                "official_url": row.candidate.official_url,
+                "description": row.candidate.description,
+                "category": row.candidate.category,
+            }
+        )
+        row_id_to_index[row_id] = idx
+
+    # Get field definitions for fields that need enrichment
+    fields_to_enrich = set()
+    for field_names in rows_to_enrich.values():
+        fields_to_enrich.update(field_names)
+
+    field_definitions = [
+        {
+            "category": str(f.category.value) if hasattr(f.category, "value") else str(f.category),
+            "name": f.name,
+            "prompt": f.prompt,
+            "data_type": str(f.data_type.value)
+            if hasattr(f.data_type, "value")
+            else str(f.data_type),
+        }
+        for f in table.fields
+        if f.name in fields_to_enrich
+    ]
+
+    if not field_definitions:
+        logger.warning("No field definitions for pending fields")
+        return table
+
+    # Initialize Lattice service and enrich
+    lattice_service = LatticeService()
+    lattice_fields = lattice_service.prepare_field_definitions(field_definitions)
+
+    results = await lattice_service.enrich_candidates(candidates_for_lattice, lattice_fields)
+
+    # Update table cells with results
+    enriched_count = 0
+    failed_count = 0
+
+    for row_id, fields_for_row in rows_to_enrich.items():
+        idx = row_id_to_index[row_id]
+        result = results[idx] if idx < len(results) else None
+
+        if result and result.success:
+            for field_name in fields_for_row:
+                value = result.data.get(field_name)
+                table.update_cell(
+                    row_id=row_id,
+                    field_name=field_name,
+                    value=value,
+                    status=CellStatus.ENRICHED,
+                    source="lattice",
+                )
+                enriched_count += 1
+        else:
+            error_msg = result.error if result else "No result"
+            for field_name in fields_for_row:
+                table.update_cell(
+                    row_id=row_id,
+                    field_name=field_name,
+                    value=None,
+                    status=CellStatus.FAILED,
+                    source="lattice",
+                    error=error_msg,
+                )
+                failed_count += 1
+
+    logger.info(f"Enrichment complete: {enriched_count} cells enriched, {failed_count} failed")
+
+    return table
+
+
+def _format_field_name(name: str) -> str:
+    """Convert field_name_like_this to 'Field Name Like This'."""
+    return name.replace("_", " ").title()
+
+
 def _format_fields_for_display(field_definitions: list[dict]) -> str:
     """
     Format field definitions for user display in HITL confirmation.
@@ -573,12 +953,12 @@ def _format_fields_for_display(field_definitions: list[dict]) -> str:
         field_definitions: List of field definition dicts
 
     Returns:
-        Formatted string for display
+        Formatted string for display with rich markdown
     """
     # Group by category
-    standard = []
-    category_specific = []
-    user_driven = []
+    basics = []  # standard fields like name, price, official_url
+    specs = []  # category-specific technical specs
+    priorities = []  # user-driven based on their requirements
 
     for field in field_definitions:
         name = field.get("name", "unknown")
@@ -588,22 +968,32 @@ def _format_fields_for_display(field_definitions: list[dict]) -> str:
         if cat == "qualification":
             continue
 
+        display_name = _format_field_name(name)
+
         if cat == "standard":
-            standard.append(name)
+            basics.append(display_name)
         elif cat == "category":
-            category_specific.append(name)
+            specs.append(display_name)
         else:
-            user_driven.append(name)
+            priorities.append(display_name)
 
-    parts = []
-    if standard:
-        parts.append(f"**Standard fields:** {', '.join(standard)}")
-    if category_specific:
-        parts.append(f"**Category-specific:** {', '.join(category_specific)}")
-    if user_driven:
-        parts.append(f"**Based on your priorities:** {', '.join(user_driven)}")
+    lines = []
 
-    return "\n".join(parts) if parts else "Standard comparison fields"
+    if basics:
+        lines.append("**Basics:** " + ", ".join(basics))
+
+    if specs:
+        # Format specs as a bullet list for readability
+        lines.append("\n**Specs I'll research:**")
+        for spec in specs:
+            lines.append(f"- {spec}")
+
+    if priorities:
+        lines.append("\n**Based on your priorities:**")
+        for priority in priorities:
+            lines.append(f"- {priority}")
+
+    return "\n".join(lines) if lines else "Standard comparison fields"
 
 
 def _parse_hitl_choice(content: str) -> str | None:
@@ -646,10 +1036,10 @@ async def research_node(state: AgentState) -> Command:
     """
     RESEARCH node - Find product candidates and build comparison table.
 
-    This node has two sub-steps with HITL confirmation between them:
-    1. Explorer (conditional) - Find candidates via web search
-    2. [HITL checkpoint] - User confirms fields before enrichment
-    3. Enricher - Build comparison table via Lattice
+    This node supports three data flow paths:
+    1. New Search (need_new_search=True): Run explorer, add rows to living table, enrich all
+    2. Add Fields (requested_fields set): Add new fields to existing table, enrich only new column
+    3. Re-enrich (need_new_search=False, no requested_fields): Re-enrich flagged cells
 
     HITL Flow:
     - After Explorer finds candidates, shows "Enrich Now" / "Modify Fields" buttons
@@ -667,6 +1057,11 @@ async def research_node(state: AgentState) -> Command:
     need_new_search = state.get("need_new_search", True)
     candidates = state.get("candidates", [])
     awaiting_fields = state.get("awaiting_fields_confirmation", False)
+
+    # FIX: Read requested_fields from state (this was the bug - never read before!)
+    requested_fields = state.get("requested_fields", [])
+    if requested_fields:
+        logger.info(f"RESEARCH: Detected requested_fields from ADVISE: {requested_fields}")
 
     # Check for HITL action at start
     if messages:
@@ -700,12 +1095,34 @@ async def research_node(state: AgentState) -> Command:
                     )
 
                 try:
-                    # Run enricher with pending data
+                    # Build living table and enrich
+                    living_table = _get_or_create_living_table(state)
+
+                    # Add standard fields to table if empty
+                    if not living_table.fields:
+                        for field_dict in pending_fields:
+                            field_def = FieldDefinition(
+                                name=field_dict["name"],
+                                prompt=field_dict["prompt"],
+                                data_type=field_dict["data_type"],
+                                category=field_dict["category"],
+                            )
+                            living_table.add_field(field_def)
+
+                    # Add candidates to table (with deduplication)
+                    _add_candidates_to_table(living_table, existing_candidates)
+
+                    # Enrich all pending cells
+                    living_table = await enrich_living_table(living_table)
+
+                    # Also create legacy comparison_table for backward compatibility
                     comparison_table = await enricher_step(existing_candidates, pending_fields)
 
-                    num_candidates = len(comparison_table.get("candidates", []))
+                    num_candidates = living_table.get_row_count()
+                    qualified = len(living_table.get_qualified_rows())
                     response_msg = (
-                        f"Research complete! I found {num_candidates} products to compare."
+                        f"Research complete! I found {qualified} products that match your requirements "
+                        f"(out of {num_candidates} analyzed)."
                     )
 
                     logger.info("RESEARCH: Enrichment complete, transitioning to ADVISE")
@@ -714,8 +1131,10 @@ async def research_node(state: AgentState) -> Command:
                         update={
                             "current_node": "research",
                             "current_phase": "advise",
-                            "comparison_table": comparison_table,
+                            "living_table": living_table.model_dump(),
+                            "comparison_table": comparison_table,  # Legacy support
                             "need_new_search": False,
+                            "requested_fields": [],  # Clear after processing
                             "advise_has_presented": False,
                             "messages": [AIMessage(content=response_msg)],
                             **_clear_hitl_flags(),
@@ -758,15 +1177,29 @@ async def research_node(state: AgentState) -> Command:
         last_message = messages[-1]
         if hasattr(last_message, "content") and not last_message.content.startswith("[HITL:"):
             logger.info("RESEARCH: User provided text while awaiting fields confirmation")
-            # TODO: In future, parse user's field requests and add to field definitions
-            # For now, just proceed with enrichment
             pending_fields = state.get("pending_field_definitions", [])
             existing_candidates = state.get("candidates", [])
 
             if pending_fields and existing_candidates:
                 try:
+                    # Build living table and enrich
+                    living_table = _get_or_create_living_table(state)
+
+                    if not living_table.fields:
+                        for field_dict in pending_fields:
+                            field_def = FieldDefinition(
+                                name=field_dict["name"],
+                                prompt=field_dict["prompt"],
+                                data_type=field_dict["data_type"],
+                                category=field_dict["category"],
+                            )
+                            living_table.add_field(field_def)
+
+                    _add_candidates_to_table(living_table, existing_candidates)
+                    living_table = await enrich_living_table(living_table)
+
                     comparison_table = await enricher_step(existing_candidates, pending_fields)
-                    num_candidates = len(comparison_table.get("candidates", []))
+                    num_candidates = living_table.get_row_count()
                     response_msg = (
                         f"Research complete! I found {num_candidates} products to compare."
                     )
@@ -775,8 +1208,10 @@ async def research_node(state: AgentState) -> Command:
                         update={
                             "current_node": "research",
                             "current_phase": "advise",
+                            "living_table": living_table.model_dump(),
                             "comparison_table": comparison_table,
                             "need_new_search": False,
+                            "requested_fields": [],
                             "advise_has_presented": False,
                             "messages": [AIMessage(content=response_msg)],
                             **_clear_hitl_flags(),
@@ -787,7 +1222,107 @@ async def research_node(state: AgentState) -> Command:
                     logger.exception("RESEARCH enrichment error")
 
     try:
-        # Step 1: Explorer (if needed)
+        # =====================================================================
+        # PATH 2: Add Fields Only (requested_fields set, need_new_search=False)
+        # This is the FIX for the bug where requested_fields was never read!
+        # =====================================================================
+        if requested_fields and not need_new_search:
+            logger.info(f"RESEARCH: Adding requested fields: {requested_fields}")
+
+            # Get existing living table
+            living_table = _get_or_create_living_table(state)
+
+            if not living_table.rows:
+                logger.warning("No existing rows in table, cannot add fields without data")
+                return Command(
+                    update={
+                        "messages": [
+                            AIMessage(
+                                content="I need to find products first before I can add comparison fields. Let me search for options."
+                            )
+                        ],
+                        "current_node": "research",
+                        "current_phase": "research",
+                        "need_new_search": True,
+                        "requested_fields": [],
+                        **_clear_hitl_flags(),
+                    },
+                    goto="research",
+                )
+
+            # Add the requested fields to the table (marks all rows PENDING for these fields)
+            added_fields = _add_requested_fields_to_table(living_table, requested_fields)
+
+            if not added_fields:
+                logger.info("All requested fields already exist")
+                return Command(
+                    update={
+                        "messages": [
+                            AIMessage(
+                                content=f"The fields {', '.join(requested_fields)} are already in the comparison table."
+                            )
+                        ],
+                        "current_node": "research",
+                        "current_phase": "advise",
+                        "requested_fields": [],
+                        **_clear_hitl_flags(),
+                    },
+                    goto="advise",
+                )
+
+            # Enrich only the new fields (cells are PENDING only for new fields)
+            logger.info(
+                f"Enriching {len(added_fields)} new fields for {living_table.get_row_count()} products"
+            )
+            living_table = await enrich_living_table(living_table)
+
+            # Build legacy comparison table for backward compatibility
+            field_defs_list = _build_field_definitions_list(living_table)
+            comparison_table_data = state.get("comparison_table") or {}
+            existing_candidates_data = comparison_table_data.get("candidates", [])
+
+            # Merge new field data into existing comparison_table candidates
+            for candidate_data in existing_candidates_data:
+                candidate_name = candidate_data.get("name", "")
+                # Find matching row in living table
+                for row in living_table.rows.values():
+                    if row.candidate.name == candidate_name:
+                        for field_name in added_fields:
+                            cell = row.cells.get(field_name)
+                            if cell and cell.status == CellStatus.ENRICHED:
+                                candidate_data[field_name] = cell.value
+                        break
+
+            comparison_table = {
+                "fields": field_defs_list,
+                "candidates": existing_candidates_data,
+            }
+
+            response_msg = (
+                f"I've added {', '.join(added_fields)} to the comparison table and enriched "
+                f"the data for all {living_table.get_row_count()} products."
+            )
+
+            logger.info("RESEARCH: Field addition complete, returning to ADVISE")
+
+            return Command(
+                update={
+                    "current_node": "research",
+                    "current_phase": "advise",
+                    "living_table": living_table.model_dump(),
+                    "comparison_table": comparison_table,
+                    "need_new_search": False,
+                    "requested_fields": [],  # Clear after processing
+                    "advise_has_presented": False,
+                    "messages": [AIMessage(content=response_msg)],
+                    **_clear_hitl_flags(),
+                },
+                goto="advise",
+            )
+
+        # =====================================================================
+        # PATH 1: New Search (need_new_search=True or no candidates)
+        # =====================================================================
         if need_new_search or not candidates:
             logger.info("Running Explorer sub-step")
             candidates, field_definitions = await explorer_step(state)
@@ -795,9 +1330,7 @@ async def research_node(state: AgentState) -> Command:
             # After Explorer completes, pause for HITL confirmation
             fields_summary = _format_fields_for_display(field_definitions)
             confirmation_message = (
-                f"Found {len(candidates)} products!\n\n"
-                f"I'll compare them on:\n{fields_summary}\n\n"
-                f"Ready to analyze these products?"
+                f"🔍 **Found {len(candidates)} products!**\n\n{fields_summary}\n\nReady to analyze?"
             )
 
             logger.info("RESEARCH: Explorer complete, awaiting HITL confirmation for fields")
@@ -814,42 +1347,70 @@ async def research_node(state: AgentState) -> Command:
                 },
                 goto="__end__",  # Return control to user for HITL
             )
-        else:
-            logger.info("Skipping Explorer (re-enrichment mode)")
-            # Use existing candidates and field definitions
+
+        # =====================================================================
+        # PATH 3: Re-enrich (need_new_search=False, no requested_fields)
+        # =====================================================================
+        logger.info("Skipping Explorer (re-enrichment mode)")
+
+        # Get existing living table or build from legacy data
+        living_table = _get_or_create_living_table(state)
+
+        # If living table is empty, build from legacy comparison_table
+        if not living_table.rows:
             comparison_table_data = state.get("comparison_table") or {}
             field_definitions = comparison_table_data.get("fields", [])
 
-            # Defensive fallback if no field definitions exist
             if not field_definitions:
                 logger.warning("No existing field definitions found, regenerating")
                 requirements = state.get("user_requirements", {})
                 product_type = requirements.get("product_type", "product")
-                field_definitions = generate_field_definitions(product_type, requirements)
+                settings = get_settings()
+                llm_service = LLMService(settings)
+                field_definitions = await generate_field_definitions(
+                    product_type, requirements, llm_service
+                )
 
-            # Step 2: Enricher (always when in re-enrichment mode)
-            logger.info("Running Enricher sub-step")
-            comparison_table = await enricher_step(candidates, field_definitions)
+            # Add fields to living table
+            for field_dict in field_definitions:
+                field_def = FieldDefinition(
+                    name=field_dict["name"],
+                    prompt=field_dict["prompt"],
+                    data_type=field_dict["data_type"],
+                    category=field_dict["category"],
+                )
+                living_table.add_field(field_def)
 
-            # Build response message
-            num_candidates = len(comparison_table.get("candidates", []))
-            response_msg = f"Research complete! I found {num_candidates} products to compare."
+            # Add candidates to living table
+            _add_candidates_to_table(living_table, candidates)
 
-            logger.info("RESEARCH complete, transitioning to ADVISE")
+        # Enrich pending cells
+        living_table = await enrich_living_table(living_table)
 
-            return Command(
-                update={
-                    "current_node": "research",
-                    "current_phase": "advise",
-                    "candidates": candidates,
-                    "comparison_table": comparison_table,
-                    "need_new_search": False,
-                    "advise_has_presented": False,
-                    "messages": [AIMessage(content=response_msg)],
-                    **_clear_hitl_flags(),
-                },
-                goto="advise",
-            )
+        # Also run legacy enricher for backward compatibility
+        field_defs_list = _build_field_definitions_list(living_table)
+        comparison_table = await enricher_step(candidates, field_defs_list)
+
+        num_candidates = living_table.get_row_count()
+        response_msg = f"Research complete! I found {num_candidates} products to compare."
+
+        logger.info("RESEARCH complete, transitioning to ADVISE")
+
+        return Command(
+            update={
+                "current_node": "research",
+                "current_phase": "advise",
+                "candidates": candidates,
+                "living_table": living_table.model_dump(),
+                "comparison_table": comparison_table,
+                "need_new_search": False,
+                "requested_fields": [],
+                "advise_has_presented": False,
+                "messages": [AIMessage(content=response_msg)],
+                **_clear_hitl_flags(),
+            },
+            goto="advise",
+        )
 
     except Exception:
         logger.exception("RESEARCH error")

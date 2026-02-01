@@ -372,3 +372,45 @@ class MockLLMClient:
 def get_llm_service() -> LLMService:
     """Get cached LLM service instance."""
     return LLMService(get_settings())
+
+
+def get_intake_llm_service() -> LLMService:
+    """
+    Get LLM service configured for intake requirement extraction.
+
+    Uses GPT-4.1 for better understanding of nuanced requirements
+    like condition (second hand), year ranges, and specifications.
+    """
+    settings = get_settings()
+
+    # Create a custom service with intake-specific model
+    service = LLMService(settings)
+    service.model = settings.intake_model
+    service.temperature = settings.intake_temperature
+
+    # Recreate client with new model
+    service._client = None  # Reset to force lazy reload
+
+    logger.info(f"Intake LLM service: {service.provider}/{service.model}")
+    return service
+
+
+def get_intake_chat_llm_service() -> LLMService:
+    """
+    Get LLM service configured for intake chat responses.
+
+    Uses GPT-4.1-mini for fast, snappy conversational responses.
+    Separate from requirement extraction which uses the full GPT-4.1.
+    """
+    settings = get_settings()
+
+    # Create a custom service with intake chat model
+    service = LLMService(settings)
+    service.model = settings.intake_chat_model
+    service.temperature = settings.intake_chat_temperature
+
+    # Recreate client with new model
+    service._client = None  # Reset to force lazy reload
+
+    logger.info(f"Intake chat LLM service: {service.provider}/{service.model}")
+    return service

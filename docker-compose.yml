@@ -44,7 +44,7 @@ services:
     container_name: agent-template-migrations
     command: ["alembic", "upgrade", "head"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_template
+      APP_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_template
     depends_on:
       db:
         condition: service_healthy
@@ -61,7 +61,8 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template
+      - APP_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template
+      - ENABLE_DATA_LAYER=true
       - S3_ENDPOINT_URL=http://localhost:4566
       - S3_BUCKET=uploads
       - AWS_ACCESS_KEY_ID=test

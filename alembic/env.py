@@ -12,9 +12,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Get database URL from environment, defaulting to the value in .env
+# Get database URL from environment (APP_DATABASE_URL to avoid Chainlit auto-detection)
 database_url = os.getenv(
-    "DATABASE_URL",
+    "APP_DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template",
 )
 

@@ -26,9 +26,7 @@ class SearchQuery(BaseModel):
 
     query: str = Field(description="The search query text")
     angle: str = Field(description="Type of search angle")
-    expected_results: str = Field(
-        default="", description="What products this query should find"
-    )
+    expected_results: str = Field(default="", description="What products this query should find")
 
 
 class SearchQueryPlan(BaseModel):
@@ -163,6 +161,8 @@ class SearchStrategyService:
             "year": datetime.now().year,
             "must_haves": requirements.get("must_haves", []),
             "nice_to_haves": requirements.get("nice_to_haves", []),
+            "specifications": requirements.get("specifications", []),
+            "constraints": requirements.get("constraints", []),
             "budget_constraint": f"{region_config.get('currency', '£')}{budget_max}"
             if budget_max
             else "No specific budget",
@@ -186,12 +186,12 @@ class SearchStrategyService:
             "use_cases",
             "must_haves",
             "nice_to_haves",
+            "specifications",
+            "constraints",
             "priorities",
         ]:
             if isinstance(formatted_context.get(key), list):
-                formatted_context[key] = (
-                    ", ".join(formatted_context[key]) or "None specified"
-                )
+                formatted_context[key] = ", ".join(formatted_context[key]) or "None specified"
 
         try:
             return template.format(**formatted_context)
@@ -261,13 +261,9 @@ class SearchStrategyService:
             logger.warning(f"Missing required angles: {missing}")
 
         if len(plan.brands_covered) < 3:
-            logger.warning(
-                f"Low brand diversity: only {len(plan.brands_covered)} brands"
-            )
+            logger.warning(f"Low brand diversity: only {len(plan.brands_covered)} brands")
 
-    def _fallback_queries(
-        self, requirements: dict, context: dict
-    ) -> SearchQueryPlan:
+    def _fallback_queries(self, requirements: dict, context: dict) -> SearchQueryPlan:
         """Generate fallback queries when LLM generation fails."""
         product_type = requirements.get("product_type", "product")
         budget_max = requirements.get("budget_max")

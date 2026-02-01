@@ -89,8 +89,16 @@ user_prompt_template: |
   ## Specific Requirements to Address:
   - Must-have features: {must_haves}
   - Nice-to-have features: {nice_to_haves}
+  - Specifications (scope narrowers): {specifications}
+  - Things to avoid: {constraints}
   - Budget constraint: {budget_constraint}
   - Priorities: {priorities}
+
+  ## Important: Specifications
+  Specifications define the search scope (e.g., "second hand", "year 2010-2020", "UK market").
+  These MUST be incorporated into search queries to find the right products.
+  For example, if specifications include "second hand" and "year 2010-2020", queries should
+  target used car markets, classifieds, and include year ranges.
 
   Generate 10-15 diverse queries covering ALL mandatory angles.
   Ensure queries are specific enough to find distinct products.

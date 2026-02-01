@@ -24,10 +24,24 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_temperature: float = 0.7
 
+    # Intake-specific models
+    # GPT-4.1 for requirement extraction (better nuanced understanding)
+    intake_model: str = "gpt-4.1"
+    intake_temperature: float = 0.3
+    # GPT-4.1-mini for conversational chat (fast, snappy responses)
+    intake_chat_model: str = "gpt-4.1-mini"
+    intake_chat_temperature: float = 0.7
+
+    # -------------------------------------------------------------------------
+    # Research Configuration
+    # -------------------------------------------------------------------------
+    max_products: int = 30  # Maximum number of products to include in comparison
+
     # -------------------------------------------------------------------------
     # Database Configuration
     # -------------------------------------------------------------------------
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template"
+    # Named APP_DATABASE_URL to avoid Chainlit auto-detection of DATABASE_URL
+    app_database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template"
 
     # -------------------------------------------------------------------------
     # S3 Storage Configuration
@@ -56,6 +70,7 @@ class Settings(BaseSettings):
     chainlit_auth_secret: str = ""
     chainlit_host: str = "0.0.0.0"
     chainlit_port: int = 8000
+    enable_data_layer: bool = False  # Set True when running with PostgreSQL
 
     # -------------------------------------------------------------------------
     # Web Search Configuration (OpenAI Responses API)
@@ -67,10 +82,9 @@ class Settings(BaseSettings):
     web_search_user_region: str | None = None
 
     # -------------------------------------------------------------------------
-    # Lattice Enrichment Configuration
+    # Lattice Enrichment Configuration (uses OpenAI web search)
     # -------------------------------------------------------------------------
-    tavily_api_key: str = ""
-    lattice_model: str = "gpt-4.1-mini"
+    lattice_model: str = "o4-mini"
     lattice_temperature: float = 0.2
     lattice_max_tokens: int = 8000
     lattice_batch_size: int = 20
@@ -79,6 +93,8 @@ class Settings(BaseSettings):
     lattice_enable_checkpointing: bool = True
     lattice_checkpoint_interval: int = 100
     lattice_max_retries: int = 3
+    lattice_reasoning_effort: Literal["low", "medium", "high"] = "low"
+    lattice_use_reasoning: bool = True
 
     # -------------------------------------------------------------------------
     # Logging Configuration
