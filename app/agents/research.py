@@ -13,6 +13,7 @@ from app.models.schemas.shortlist import SearchQuery, SearchQueryPlan
 from app.models.state import AgentState
 from app.services.lattice import LatticeService
 from app.services.llm import LLMService
+from app.services.search_strategy import get_search_strategy_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,48 +24,6 @@ EXPLORER_PROMPT_PATH = PROMPTS_DIR / "explorer.yaml"
 
 with open(EXPLORER_PROMPT_PATH) as f:
     EXPLORER_PROMPTS = yaml.safe_load(f)
-
-# Query generation prompt for LLM-driven search strategy
-QUERY_GENERATION_PROMPT = """You are a product research strategist. Given user requirements,
-generate 3-6 diverse web search queries to find matching products.
-
-User Requirements:
-{requirements_json}
-
-Generate search queries that:
-1. Cover different angles (review sites, Reddit, comparison articles, manufacturer sites)
-2. Use different phrasings to catch different results
-3. Include time-relevant terms (2025, 2026, latest)
-4. Balance specific features vs broader category searches
-
-For extensive requirements, split features across queries rather than cramming all into one.
-
-Return as JSON:
-{{
-    "queries": [
-        {{"query": "best 4-slot toasters under £30 2025 reviews", "angle": "review_sites"}},
-        {{"query": "4 slot toaster defrost function reddit recommendations", "angle": "community"}},
-        {{"query": "budget toaster stainless steel comparison UK", "angle": "comparison"}}
-    ],
-    "strategy_notes": "Brief explanation of search strategy"
-}}
-"""
-
-# System prompt for web search to extract product candidates
-SEARCH_SYSTEM_PROMPT = """You are a product researcher. Search for products matching the query.
-For each product found, extract:
-- Full product name
-- Manufacturer/brand
-- Official product URL (manufacturer site preferred, not retailer)
-- Brief description
-
-Return results as a JSON array:
-[
-    {{"name": "Product Name", "manufacturer": "Brand", "official_url": "https://...", "description": "Brief description"}},
-    ...
-]
-
-Focus on finding real, specific products. Include 5-15 products per search."""
 
 
 def _summarize_requirements(requirements: dict) -> str:
@@ -110,74 +69,81 @@ def _summarize_requirements(requirements: dict) -> str:
     return "; ".join(parts)
 
 
-def _get_fallback_queries(product_type: str, requirements: dict) -> list[SearchQuery]:
-    """
-    Generate fallback search queries when LLM query generation fails.
-
-    Args:
-        product_type: Type of product
-        requirements: User requirements dict
-
-    Returns:
-        List of default SearchQuery objects
-    """
-    budget_max = requirements.get("budget_max")
-    budget_str = f" under ${budget_max}" if budget_max else ""
-    must_haves = requirements.get("must_haves", [])
-    features_str = f" {' '.join(must_haves[:2])}" if must_haves else ""
-
-    return [
-        SearchQuery(
-            query=f"best {product_type}{budget_str} 2025 reviews",
-            angle="review_sites",
-        ),
-        SearchQuery(
-            query=f"{product_type}{features_str} recommendations reddit",
-            angle="community",
-        ),
-        SearchQuery(
-            query=f"top rated {product_type} comparison 2025",
-            angle="comparison",
-        ),
-    ]
-
-
 async def _generate_search_queries(
     llm_service: LLMService,
     requirements: dict,
 ) -> SearchQueryPlan:
     """
-    Use LLM to generate diverse search queries based on requirements.
+    Use the SearchStrategyService to generate diverse search queries.
+
+    This now uses a category-aware knowledge base to generate queries across:
+    - Review sites (Wirecutter, TechRadar, Which?, etc.)
+    - Reddit communities (r/BuyItForLife, category-specific subreddits)
+    - Top brand catalogs
+    - Comparison articles
+    - Budget and premium options
+    - Feature-focused searches
+    - Use case searches
+    - Alternative/underrated product searches
 
     Args:
         llm_service: LLM service instance
         requirements: User requirements dict
 
     Returns:
-        SearchQueryPlan with 3-6 diverse queries
+        SearchQueryPlan with 10-15 diverse queries
     """
-    product_type = requirements.get("product_type", "product")
-
     try:
-        # Format the prompt with requirements
-        prompt = QUERY_GENERATION_PROMPT.format(
-            requirements_json=json.dumps(requirements, indent=2)
+        # Use the new search strategy service
+        search_service = get_search_strategy_service()
+        result = await search_service.generate_queries(requirements, llm_service)
+
+        # Convert to SearchQueryPlan from shortlist schema
+        queries = [
+            SearchQuery(
+                query=q.query,
+                angle=q.angle,
+                expected_results=q.expected_results,
+            )
+            for q in result.queries
+        ]
+
+        plan = SearchQueryPlan(
+            queries=queries,
+            strategy_notes=result.strategy_notes,
+            brands_covered=result.brands_covered,
+            sources_covered=result.sources_covered,
         )
 
-        # Generate structured output
-        result = await llm_service.generate_structured(
-            messages=[HumanMessage(content=prompt)],
-            schema=SearchQueryPlan,
-        )
+        # Log detailed breakdown
+        angles = [q.angle for q in queries]
+        angle_counts = {a: angles.count(a) for a in set(angles)}
+        logger.info(f"Generated {len(queries)} diverse queries")
+        logger.info(f"Query angles: {angle_counts}")
+        logger.info(f"Brands covered: {result.brands_covered}")
+        logger.info(f"Strategy: {result.strategy_notes}")
 
-        logger.info(f"Generated {len(result.queries)} queries: {result.strategy_notes}")
-        return result
+        return plan
 
     except Exception as e:
-        logger.warning(f"Query generation failed, using fallback: {e}")
+        logger.warning(f"Search strategy generation failed, using fallback: {e}")
+        # Fallback to basic queries
+        product_type = requirements.get("product_type", "product")
+        budget_max = requirements.get("budget_max")
+        budget_str = f" under £{budget_max}" if budget_max else ""
+
+        fallback_queries = [
+            SearchQuery(query=f"best {product_type}{budget_str} 2025 reviews", angle="REVIEW_SITE"),
+            SearchQuery(query=f"{product_type} recommendations reddit", angle="REDDIT"),
+            SearchQuery(query=f"top rated {product_type} comparison 2025", angle="COMPARISON"),
+            SearchQuery(query=f"{product_type} alternatives underrated 2025", angle="ALTERNATIVES"),
+        ]
+
         return SearchQueryPlan(
-            queries=_get_fallback_queries(product_type, requirements),
+            queries=fallback_queries,
             strategy_notes="Fallback queries due to generation error",
+            brands_covered=[],
+            sources_covered=["review sites", "reddit"],
         )
 
 
@@ -271,6 +237,28 @@ def _deduplicate_candidates(candidates: list[dict]) -> list[dict]:
     return deduped
 
 
+# System prompt for web search to extract product candidates
+SEARCH_SYSTEM_PROMPT = """You are a product researcher. Search for products matching the query.
+For each product found, extract:
+- Full product name (be specific, include model numbers)
+- Manufacturer/brand
+- Official product URL (manufacturer site preferred, not retailer)
+- Brief description
+
+Return results as a JSON array:
+[
+    {"name": "Product Name Model X123", "manufacturer": "Brand", "official_url": "https://...", "description": "Brief description"},
+    ...
+]
+
+IMPORTANT:
+- Find 8-15 DISTINCT products per search
+- Include model numbers/variants when available
+- Prioritize manufacturer URLs over retailer URLs
+- Include a mix of popular and lesser-known options
+- Don't repeat the same product with different names"""
+
+
 async def _execute_parallel_searches(
     queries: list[SearchQuery],
     llm_service: LLMService,
@@ -280,18 +268,22 @@ async def _execute_parallel_searches(
     Execute multiple web searches in parallel.
 
     Args:
-        queries: List of search queries
+        queries: List of search queries (10-15 diverse queries)
         llm_service: LLM service instance
         product_type: Type of product for context
 
     Returns:
         List of all candidates from all searches (not yet deduplicated)
     """
+    # Log all queries being executed
+    logger.info(f"Executing {len(queries)} parallel searches:")
+    for i, q in enumerate(queries, 1):
+        logger.info(f"  [{i}] ({q.angle}) {q.query[:60]}...")
 
-    async def single_search(query: SearchQuery) -> list[dict]:
+    async def single_search(query: SearchQuery, index: int) -> list[dict]:
         """Execute a single web search and extract candidates."""
         try:
-            logger.debug(f"Executing search: {query.query} ({query.angle})")
+            logger.debug(f"[{index}] Starting search: {query.query}")
 
             response = await llm_service.generate_with_web_search(
                 messages=[HumanMessage(content=query.query)],
@@ -299,26 +291,41 @@ async def _execute_parallel_searches(
             )
 
             candidates = _extract_candidates_from_response(response.content)
-            logger.info(f"Search '{query.angle}' found {len(candidates)} candidates")
 
-            # Add category to each candidate
+            # Log with angle and count
+            logger.info(
+                f"[{index}] {query.angle}: {len(candidates)} candidates "
+                f"(query: {query.query[:40]}...)"
+            )
+
+            # Add metadata to each candidate
             for c in candidates:
                 c["category"] = product_type
+                c["source_angle"] = query.angle
+                c["source_query"] = query.query
 
             return candidates
 
         except Exception as e:
-            logger.warning(f"Search failed for '{query.query}': {e}")
+            logger.warning(f"[{index}] Search failed for '{query.query[:40]}...': {e}")
             return []
 
     # Run all searches in parallel
-    tasks = [single_search(q) for q in queries]
+    tasks = [single_search(q, i) for i, q in enumerate(queries, 1)]
     results = await asyncio.gather(*tasks)
 
-    # Flatten results
+    # Flatten results and log summary
     all_candidates = []
-    for result in results:
+    angle_counts: dict[str, int] = {}
+
+    for i, result in enumerate(results):
         all_candidates.extend(result)
+        if queries[i].angle not in angle_counts:
+            angle_counts[queries[i].angle] = 0
+        angle_counts[queries[i].angle] += len(result)
+
+    logger.info(f"Total raw candidates: {len(all_candidates)}")
+    logger.info(f"Candidates by angle: {angle_counts}")
 
     return all_candidates
 
@@ -463,42 +470,82 @@ async def explorer_step(state: AgentState) -> tuple[list[dict], list[dict]]:
     """
     Explorer sub-step - Find product candidates via web search.
 
+    Uses the SearchStrategyService to generate diverse queries across:
+    - Review sites (Wirecutter, TechRadar, Which?, etc.)
+    - Reddit communities (category-specific subreddits)
+    - Top brand catalogs
+    - Comparison articles
+    - Budget/premium options
+    - Feature-focused and use-case searches
+
     Args:
         state: Current workflow state
 
     Returns:
         Tuple of (candidates, field_definitions)
     """
+    logger.info("=" * 60)
     logger.info("Explorer: Starting candidate discovery")
+    logger.info("=" * 60)
 
     requirements = state.get("user_requirements", {})
     product_type = requirements.get("product_type", "product")
 
+    logger.info(f"Product type: {product_type}")
+    logger.info(f"Budget: {requirements.get('budget_max', 'No limit')}")
+    logger.info(f"Must-haves: {requirements.get('must_haves', [])}")
+
     settings = get_settings()
     llm_service = LLMService(settings)
 
-    # Phase 1: Generate search queries (LLM decides)
+    # Phase 1: Generate diverse search queries using SearchStrategyService
+    logger.info("-" * 40)
+    logger.info("Phase 1: Generating diverse search queries")
+    logger.info("-" * 40)
+
     query_plan = await _generate_search_queries(llm_service, requirements)
-    logger.info(f"Explorer: Generated {len(query_plan.queries)} search queries")
+
+    logger.info(f"Generated {len(query_plan.queries)} queries")
+    if query_plan.brands_covered:
+        logger.info(f"Brands covered: {', '.join(query_plan.brands_covered)}")
+    if query_plan.sources_covered:
+        logger.info(f"Sources covered: {', '.join(query_plan.sources_covered)}")
 
     # Phase 2: Execute parallel web searches
+    logger.info("-" * 40)
+    logger.info("Phase 2: Executing parallel web searches")
+    logger.info("-" * 40)
+
     raw_candidates = await _execute_parallel_searches(
         query_plan.queries,
         llm_service,
         product_type,
     )
-    logger.info(f"Explorer: Found {len(raw_candidates)} raw candidates")
+    logger.info(f"Raw candidates found: {len(raw_candidates)}")
 
     # Phase 3: Deduplicate
+    logger.info("-" * 40)
+    logger.info("Phase 3: Deduplicating candidates")
+    logger.info("-" * 40)
+
     candidates = _deduplicate_candidates(raw_candidates)
-    logger.info(f"Explorer: {len(candidates)} unique candidates after deduplication")
+    dedup_rate = (1 - len(candidates) / max(len(raw_candidates), 1)) * 100
+    logger.info(f"Unique candidates: {len(candidates)} (removed {dedup_rate:.1f}% duplicates)")
+
+    # Log brand diversity
+    brands = {c.get("manufacturer", "Unknown") for c in candidates}
+    logger.info(f"Brand diversity: {len(brands)} unique brands")
 
     # Warn if fewer than expected
-    if len(candidates) < 10:
-        logger.warning(f"Explorer: Only {len(candidates)} candidates found (expected 20+)")
+    if len(candidates) < 20:
+        logger.warning(f"Only {len(candidates)} candidates found (target: 40+)")
 
     # Generate field definitions (including qualification fields)
     field_definitions = generate_field_definitions(product_type, requirements)
+
+    logger.info("=" * 60)
+    logger.info(f"Explorer complete: {len(candidates)} candidates, {len(field_definitions)} fields")
+    logger.info("=" * 60)
 
     return candidates, field_definitions
 
@@ -709,7 +756,11 @@ async def research_node(state: AgentState) -> Command:
                     logger.error("RESEARCH: Missing pending data for enrichment")
                     return Command(
                         update={
-                            "messages": [AIMessage(content="Something went wrong. Let me restart the search.")],
+                            "messages": [
+                                AIMessage(
+                                    content="Something went wrong. Let me restart the search."
+                                )
+                            ],
                             "current_node": "research",
                             "current_phase": "research",
                             **_clear_hitl_flags(),
@@ -722,7 +773,9 @@ async def research_node(state: AgentState) -> Command:
                     comparison_table = await enricher_step(existing_candidates, pending_fields)
 
                     num_candidates = len(comparison_table.get("candidates", []))
-                    response_msg = f"Research complete! I found {num_candidates} products to compare."
+                    response_msg = (
+                        f"Research complete! I found {num_candidates} products to compare."
+                    )
 
                     logger.info("RESEARCH: Enrichment complete, transitioning to ADVISE")
 
@@ -742,7 +795,9 @@ async def research_node(state: AgentState) -> Command:
                     logger.exception("RESEARCH enrichment error")
                     return Command(
                         update={
-                            "messages": [AIMessage(content="I encountered an issue during enrichment.")],
+                            "messages": [
+                                AIMessage(content="I encountered an issue during enrichment.")
+                            ],
                             "current_node": "research",
                             "current_phase": "error",
                             **_clear_hitl_flags(),
@@ -754,7 +809,11 @@ async def research_node(state: AgentState) -> Command:
                 logger.info("RESEARCH: User wants to modify fields")
                 return Command(
                     update={
-                        "messages": [AIMessage(content="What fields would you like me to add or change for the comparison? For example, you could ask for 'energy efficiency', 'warranty length', or 'weight'.")],
+                        "messages": [
+                            AIMessage(
+                                content="What fields would you like me to add or change for the comparison? For example, you could ask for 'energy efficiency', 'warranty length', or 'weight'."
+                            )
+                        ],
                         "current_node": "research",
                         "current_phase": "research",
                         **_clear_hitl_flags(),
@@ -777,7 +836,9 @@ async def research_node(state: AgentState) -> Command:
                 try:
                     comparison_table = await enricher_step(existing_candidates, pending_fields)
                     num_candidates = len(comparison_table.get("candidates", []))
-                    response_msg = f"Research complete! I found {num_candidates} products to compare."
+                    response_msg = (
+                        f"Research complete! I found {num_candidates} products to compare."
+                    )
 
                     return Command(
                         update={

@@ -67,7 +67,9 @@ async def router_node(state: AgentState) -> Command:
             hitl_parsed = parse_hitl_message(last_message.content)
             if hitl_parsed:
                 checkpoint, choice = hitl_parsed
-                logger.info(f"Router: HITL message detected - checkpoint={checkpoint}, choice={choice}")
+                logger.info(
+                    f"Router: HITL message detected - checkpoint={checkpoint}, choice={choice}"
+                )
 
                 # Route based on checkpoint type
                 if checkpoint == "requirements":
@@ -175,6 +177,8 @@ class WorkflowResult:
         awaiting_requirements_confirmation: bool = False,
         awaiting_fields_confirmation: bool = False,
         awaiting_intent_confirmation: bool = False,
+        # Phase tracking
+        current_phase: str = "intake",
     ):
         self.content = content
         self.citations = citations or []
@@ -184,6 +188,8 @@ class WorkflowResult:
         self.awaiting_requirements_confirmation = awaiting_requirements_confirmation
         self.awaiting_fields_confirmation = awaiting_fields_confirmation
         self.awaiting_intent_confirmation = awaiting_intent_confirmation
+        # Phase tracking
+        self.current_phase = current_phase
 
 
 async def process_message(
@@ -278,6 +284,9 @@ async def process_message_with_state(
         awaiting_fields = result.get("awaiting_fields_confirmation", False)
         awaiting_intent = result.get("awaiting_intent_confirmation", False)
 
+        # Extract current phase
+        current_phase = result.get("current_phase", "intake")
+
         return WorkflowResult(
             content=content,
             citations=citations,
@@ -286,6 +295,7 @@ async def process_message_with_state(
             awaiting_requirements_confirmation=awaiting_requirements,
             awaiting_fields_confirmation=awaiting_fields,
             awaiting_intent_confirmation=awaiting_intent,
+            current_phase=current_phase,
         )
 
     except Exception as e:

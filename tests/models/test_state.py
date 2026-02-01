@@ -25,3 +25,23 @@ def test_create_initial_state_has_web_search_fields():
     assert state["web_search_citations"] == []
     assert state["web_search_sources"] == []
     assert state["openai_response_id"] is None
+
+
+def test_create_initial_state_has_hitl_fields():
+    """Test initial state includes HITL confirmation fields."""
+    state = create_initial_state(
+        user_id="test-user",
+        session_id="test-session",
+    )
+
+    # HITL confirmation flags should all be False
+    assert state["awaiting_requirements_confirmation"] is False
+    assert state["awaiting_fields_confirmation"] is False
+    assert state["awaiting_intent_confirmation"] is False
+
+    # HITL pending data should be None
+    assert state["action_choices"] is None
+    assert state["pending_requirements_summary"] is None
+    assert state["pending_field_definitions"] is None
+    assert state["pending_intent"] is None
+    assert state["pending_intent_details"] is None

@@ -133,7 +133,11 @@ async def _execute_confirmed_intent(
         extracted_fields = pending_details.get("extracted_fields", []) if pending_details else []
         return Command(
             update={
-                "messages": [AIMessage(content=f"Adding {', '.join(extracted_fields) if extracted_fields else 'new fields'} to the comparison...")],
+                "messages": [
+                    AIMessage(
+                        content=f"Adding {', '.join(extracted_fields) if extracted_fields else 'new fields'} to the comparison..."
+                    )
+                ],
                 "current_node": "advise",
                 "current_phase": "research",
                 "need_new_search": False,
@@ -146,7 +150,11 @@ async def _execute_confirmed_intent(
     elif pending_intent == "change_requirements":
         return Command(
             update={
-                "messages": [AIMessage(content="Let's update your requirements. What would you like to change?")],
+                "messages": [
+                    AIMessage(
+                        content="Let's update your requirements. What would you like to change?"
+                    )
+                ],
                 "current_node": "advise",
                 "current_phase": "intake",
                 "advise_has_presented": False,
@@ -158,7 +166,9 @@ async def _execute_confirmed_intent(
         # Fallback
         return Command(
             update={
-                "messages": [AIMessage(content="I'm not sure what action to take. Can you clarify?")],
+                "messages": [
+                    AIMessage(content="I'm not sure what action to take. Can you clarify?")
+                ],
                 "current_node": "advise",
                 "current_phase": "advise",
                 **_clear_hitl_flags(),
@@ -213,7 +223,11 @@ async def advise_node(state: AgentState) -> Command:
                 logger.info("ADVISE: User wants to clarify")
                 return Command(
                     update={
-                        "messages": [AIMessage(content="No problem! Please tell me more about what you'd like to do.")],
+                        "messages": [
+                            AIMessage(
+                                content="No problem! Please tell me more about what you'd like to do."
+                            )
+                        ],
                         "current_node": "advise",
                         "current_phase": "advise",
                         **_clear_hitl_flags(),
@@ -226,7 +240,9 @@ async def advise_node(state: AgentState) -> Command:
         last_message = messages[-1]
         if hasattr(last_message, "content") and not last_message.content.startswith("[HITL:"):
             # User typed instead of clicking - treat as clarification
-            logger.info("ADVISE: User provided text while awaiting intent confirmation - treating as clarification")
+            logger.info(
+                "ADVISE: User provided text while awaiting intent confirmation - treating as clarification"
+            )
             # Clear HITL flags and continue with normal intent detection
             # Fall through to normal processing below
 

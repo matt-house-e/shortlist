@@ -171,7 +171,9 @@ async def intake_node(state: AgentState) -> Command:
     # Check for HITL action at start
     if messages:
         last_message = messages[-1]
-        if hasattr(last_message, "content") and last_message.content.startswith("[HITL:requirements:"):
+        if hasattr(last_message, "content") and last_message.content.startswith(
+            "[HITL:requirements:"
+        ):
             choice = parse_hitl_choice(last_message.content)
             logger.info(f"INTAKE: HITL action received - {choice}")
 
@@ -192,7 +194,11 @@ async def intake_node(state: AgentState) -> Command:
                 logger.info("INTAKE: User wants to edit requirements")
                 return Command(
                     update={
-                        "messages": [AIMessage(content="No problem! What would you like to change or add to your requirements?")],
+                        "messages": [
+                            AIMessage(
+                                content="No problem! What would you like to change or add to your requirements?"
+                            )
+                        ],
                         "current_node": "intake",
                         "current_phase": "intake",
                         **_clear_hitl_flags(),
