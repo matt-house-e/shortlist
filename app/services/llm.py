@@ -380,9 +380,10 @@ def get_llm_service() -> LLMService:
     return LLMService(get_settings())
 
 
+@lru_cache
 def get_intake_llm_service() -> LLMService:
     """
-    Get LLM service configured for intake requirement extraction.
+    Get cached LLM service configured for intake requirement extraction.
 
     Uses GPT-4.1 for better understanding of nuanced requirements
     like condition (second hand), year ranges, and specifications.
@@ -393,17 +394,16 @@ def get_intake_llm_service() -> LLMService:
     service = LLMService(settings)
     service.model = settings.intake_model
     service.temperature = settings.intake_temperature
-
-    # Recreate client with new model
-    service._client = None  # Reset to force lazy reload
+    service._client = None  # Reset to force lazy reload with new model
 
     logger.info(f"Intake LLM service: {service.provider}/{service.model}")
     return service
 
 
+@lru_cache
 def get_intake_chat_llm_service() -> LLMService:
     """
-    Get LLM service configured for intake chat responses.
+    Get cached LLM service configured for intake chat responses.
 
     Uses GPT-4.1-mini for fast, snappy conversational responses.
     Separate from requirement extraction which uses the full GPT-4.1.
@@ -414,9 +414,7 @@ def get_intake_chat_llm_service() -> LLMService:
     service = LLMService(settings)
     service.model = settings.intake_chat_model
     service.temperature = settings.intake_chat_temperature
-
-    # Recreate client with new model
-    service._client = None  # Reset to force lazy reload
+    service._client = None  # Reset to force lazy reload with new model
 
     logger.info(f"Intake chat LLM service: {service.provider}/{service.model}")
     return service
