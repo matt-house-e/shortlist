@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 import chainlit as cl
+from chainlit.data import get_data_layer
 from chainlit.data.chainlit_data_layer import ChainlitDataLayer
 
 from app.agents.workflow import (
@@ -77,6 +78,38 @@ async def emit_phase_transition_toast(previous_phase: str, current_phase: str) -
             },
         )
         logger.info(f"Phase transition toast: {previous_phase} -> {current_phase}")
+
+
+async def update_thread_name_from_product(product_type: str | None) -> None:
+    """
+    Update the chat thread name to the product being researched.
+
+    Args:
+        product_type: The product type from user requirements (e.g., "electric kettle")
+    """
+    if not product_type:
+        return
+
+    # Check if we've already set the thread name this session
+    if cl.user_session.get("thread_name_set"):
+        return
+
+    thread_id = cl.user_session.get("thread_id")
+    if not thread_id:
+        return
+
+    data_layer = get_data_layer()
+    if not data_layer:
+        return
+
+    try:
+        # Capitalize for display (e.g., "electric kettle" -> "Electric Kettle")
+        thread_name = product_type.title()
+        await data_layer.update_thread(thread_id=thread_id, name=thread_name)
+        cl.user_session.set("thread_name_set", True)
+        logger.info(f"Updated thread name to: {thread_name}")
+    except Exception as e:
+        logger.warning(f"Failed to update thread name: {e}")
 
 
 # =============================================================================
@@ -457,6 +490,10 @@ async def on_hitl_action(action: cl.Action):
     await emit_phase_transition_toast(previous_phase, current_phase)
     cl.user_session.set("previous_phase", current_phase)
 
+    # Update thread name when transitioning from intake to research
+    if previous_phase == "intake" and current_phase == "research":
+        await update_thread_name_from_product(product_name)
+
     # Get agent name for the current phase
     agent_name = get_agent_name(current_phase)
 
@@ -523,6 +560,18 @@ async def on_message(message: cl.Message):
     current_phase = result.current_phase
     await emit_phase_transition_toast(previous_phase, current_phase)
     cl.user_session.set("previous_phase", current_phase)
+
+    # Update thread name when transitioning from intake to research
+    if previous_phase == "intake" and current_phase == "research":
+        config = {"configurable": {"thread_id": session_id}}
+        try:
+            current_state = await workflow.aget_state(config)
+            if current_state.values:
+                requirements = current_state.values.get("user_requirements") or {}
+                product_type = requirements.get("product_type")
+                await update_thread_name_from_product(product_type)
+        except Exception as e:
+            logger.warning(f"Failed to get product type for thread name: {e}")
 
     # Get agent name for the current phase
     agent_name = get_agent_name(current_phase)
