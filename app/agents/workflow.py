@@ -2,9 +2,11 @@
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
+from langgraph.types import Command
 
-from app.agents.agent import agent_node
-from app.agents.router import router_node
+from app.agents.advise import advise_node
+from app.agents.intake import intake_node
+from app.agents.research import research_node
 from app.models.state import AgentState
 from app.services.llm import LLMService
 from app.utils.logger import get_logger
@@ -12,14 +14,57 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+async def router_node(state: AgentState) -> Command:
+    """
+    Route incoming messages to the correct phase node.
+
+    This router enables proper human-in-the-loop behavior by ensuring messages
+    go to the node that should handle them based on current_phase, rather than
+    always starting at INTAKE.
+
+    Routing logic:
+    - phase == "intake" or unset → intake node
+    - phase == "advise" → advise node
+    - phase == "research" → research node (edge case, shouldn't receive messages)
+
+    Args:
+        state: Current workflow state
+
+    Returns:
+        Command routing to the appropriate node
+    """
+    current_phase = state.get("current_phase", "intake")
+    logger.info(f"Router: current_phase={current_phase}")
+
+    if current_phase == "advise":
+        logger.info("Router: directing to ADVISE")
+        return Command(goto="advise")
+    elif current_phase == "research":
+        # Edge case: user shouldn't send messages during research
+        # but if they do, route to advise to handle it
+        logger.info("Router: research phase, directing to ADVISE")
+        return Command(goto="advise")
+    else:
+        # Default to intake for "intake" phase or any other state
+        logger.info("Router: directing to INTAKE")
+        return Command(goto="intake")
+
+
 def create_workflow(llm_service: LLMService) -> StateGraph:
     """
     Create and compile the LangGraph workflow.
 
-    The workflow follows this structure:
-    1. Router node - Determines which agent should handle the request
-    2. Agent node(s) - Process the request and generate responses
-    3. End - Complete the workflow
+    The workflow follows Shortlist's 3-phase structure:
+    INTAKE → RESEARCH → ADVISE → END
+
+    With refinement loops:
+    - ADVISE → RESEARCH (more options or new fields)
+    - ADVISE → INTAKE (requirements changed)
+
+    Human-in-the-loop:
+    - INTAKE waits for user input each turn
+    - RESEARCH runs automatically
+    - ADVISE waits for user input each turn
 
     Args:
         llm_service: LLM service instance for model interactions
@@ -34,19 +79,32 @@ def create_workflow(llm_service: LLMService) -> StateGraph:
     # Add Nodes
     # -------------------------------------------------------------------------
     graph.add_node("router", router_node)
-    graph.add_node("agent", agent_node)
+    graph.add_node("intake", intake_node)
+    graph.add_node("research", research_node)
+    graph.add_node("advise", advise_node)
 
     # -------------------------------------------------------------------------
-    # Define Edges
+    # Define Entry Point
     # -------------------------------------------------------------------------
-    # Entry point
+    # All messages enter through the router, which directs to the correct
+    # phase node based on current_phase. This enables proper human-in-the-loop
+    # behavior where both INTAKE and ADVISE can receive user messages.
     graph.set_entry_point("router")
 
-    # Router routes to agent (or could route to multiple agents)
-    graph.add_edge("router", "agent")
-
-    # Agent completes the workflow
-    graph.set_finish_point("agent")
+    # -------------------------------------------------------------------------
+    # Edges are handled by Command API in each node
+    # -------------------------------------------------------------------------
+    # The router directs messages to the correct phase:
+    # - router → intake (when phase == "intake")
+    # - router → advise (when phase == "advise")
+    #
+    # Nodes use Command.goto for transitions:
+    # - intake → research (when requirements ready)
+    # - intake → __end__ (to wait for more user input)
+    # - research → advise (when table ready)
+    # - advise → __end__ (to wait for user input)
+    # - advise → research (refinement: more options or new fields)
+    # - advise → intake (refinement: requirements changed)
 
     # -------------------------------------------------------------------------
     # Compile with Memory
@@ -54,7 +112,7 @@ def create_workflow(llm_service: LLMService) -> StateGraph:
     memory = MemorySaver()
     compiled = graph.compile(checkpointer=memory)
 
-    logger.info("Workflow created and compiled")
+    logger.info("Shortlist 3-phase workflow created and compiled")
     return compiled
 
 
@@ -114,23 +172,38 @@ async def process_message_with_state(
     """
     from langchain_core.messages import HumanMessage
 
-    # Prepare initial state
-    initial_state = {
-        "messages": [HumanMessage(content=message)],
-        "user_id": user_id,
-        "session_id": session_id,
-        "phase": "start",
-        "current_node": "router",
-    }
-
     # Configure thread for memory persistence
     config = {"configurable": {"thread_id": session_id}}
 
-    # Run workflow
-    logger.info(f"Processing message for session {session_id}")
-
+    # Check if this is a new session by trying to get the current state
     try:
-        result = await workflow.ainvoke(initial_state, config)
+        current_state = await workflow.aget_state(config)
+        is_new_session = not current_state.values  # Empty state means new session
+    except Exception:
+        is_new_session = True
+
+    # Prepare input - only pass new message, let checkpointer handle rest
+    if is_new_session:
+        # First message: initialize full state
+        input_state = {
+            "messages": [HumanMessage(content=message)],
+            "user_id": user_id,
+            "session_id": session_id,
+            "current_phase": "intake",
+            "current_node": "intake",
+        }
+        logger.info(f"Starting new session {session_id}")
+    else:
+        # Subsequent messages: only pass the new message
+        # The checkpointer will merge this with existing state
+        input_state = {
+            "messages": [HumanMessage(content=message)],
+        }
+        logger.info(f"Continuing session {session_id}")
+
+    # Run workflow
+    try:
+        result = await workflow.ainvoke(input_state, config)
 
         # Extract response from messages
         messages = result.get("messages", [])

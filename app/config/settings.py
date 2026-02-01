@@ -58,13 +58,6 @@ class Settings(BaseSettings):
     chainlit_port: int = 8000
 
     # -------------------------------------------------------------------------
-    # Knowledge Base Configuration (Optional)
-    # -------------------------------------------------------------------------
-    openai_vector_store_id: str | None = None
-    kb_search_threshold: float = 0.7
-    kb_max_results: int = 5
-
-    # -------------------------------------------------------------------------
     # Web Search Configuration (OpenAI Responses API)
     # -------------------------------------------------------------------------
     web_search_enabled: bool = False
@@ -72,6 +65,20 @@ class Settings(BaseSettings):
     web_search_user_country: str | None = None
     web_search_user_city: str | None = None
     web_search_user_region: str | None = None
+
+    # -------------------------------------------------------------------------
+    # Lattice Enrichment Configuration
+    # -------------------------------------------------------------------------
+    tavily_api_key: str = ""
+    lattice_model: str = "gpt-4.1-mini"
+    lattice_temperature: float = 0.2
+    lattice_max_tokens: int = 8000
+    lattice_batch_size: int = 20
+    lattice_max_workers: int = 30
+    lattice_row_delay: float = 0.1
+    lattice_enable_checkpointing: bool = True
+    lattice_checkpoint_interval: int = 100
+    lattice_max_retries: int = 3
 
     # -------------------------------------------------------------------------
     # Logging Configuration

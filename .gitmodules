@@ -1,0 +1,3 @@
+[submodule "vendor/lattice"]
+	path = vendor/lattice
+	url = https://github.com/matt-house-e/lattice.git

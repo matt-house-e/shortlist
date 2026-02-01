@@ -9,11 +9,14 @@ from app.agents.workflow import create_workflow, process_message_with_state
 from app.auth.password_auth import password_auth_callback
 from app.config import get_settings
 from app.services.llm import LLMService
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, setup_logging
 from app.utils.sanitization import sanitize_input
 
-logger = get_logger(__name__)
+# Initialize logging before creating any loggers
 settings = get_settings()
+setup_logging(level=settings.log_level)
+
+logger = get_logger(__name__)
 
 
 # =============================================================================
