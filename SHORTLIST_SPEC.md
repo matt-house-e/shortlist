@@ -40,12 +40,16 @@ Manual product research is tedious. Users spend hours across review sites, retai
 >
 > **User:** Build quality, prefer stainless steel
 >
+> **System:** *(shows Confirm Requirements / Edit buttons)*
+>
+> **User:** *(clicks Confirm Requirements)*
+>
 > **System:** Researching... Found 24 options. Here's your shortlist:
 >
-> | Product | Price | Material | Temp Control | Rating |
-> |---------|-------|----------|--------------|--------|
-> | Fellow Stagg | £45 | Steel | 5 presets | 4.8★ |
-> | Bonavita | £38 | Steel | Variable | 4.6★ |
+> | Product | Price | Material | Temp Control |
+> |---------|-------|----------|--------------|
+> | Fellow Stagg | £45 | Steel | 5 presets |
+> | Bonavita | £38 | Steel | Variable |
 >
 > The Fellow Stagg wins on build quality. Bonavita is best value.
 >
@@ -243,32 +247,48 @@ We evaluated two architectural approaches:
 
 ---
 
-### RESEARCH Phase: Two-Step Process
+### RESEARCH Phase: Three Data Flow Paths
 
-RESEARCH contains two sequential steps that may or may not both run:
+RESEARCH operates on the Living Table and supports three distinct data flow paths:
 
 ```
 RESEARCH
 │
-├── IF new search needed:
+├── PATH 1: New Search (need_new_search = true)
 │   │
-│   └── EXPLORER
-│       ├── Input: Requirements from state
-│       ├── Action: Web search for products
-│       ├── Output: Candidate list (aim for 20+)
-│       └── Also determines: Comparison field definitions
+│   ├── EXPLORER
+│   │   ├── Input: Requirements from state
+│   │   ├── Action: Web search (10-15 diverse queries)
+│   │   ├── Output: Candidates added to Living Table
+│   │   └── Also determines: Field definitions
+│   │
+│   └── ENRICHER
+│       ├── Input: Living Table with PENDING cells
+│       ├── Action: Bulk enrichment via Lattice
+│       └── Output: Cells updated to ENRICHED/FAILED
 │
-└── ALWAYS:
+├── PATH 2: Add Fields Only (requested_fields not empty)
+│   │
+│   ├── Add field definitions to Living Table
+│   │   (marks all existing rows PENDING for new field)
+│   │
+│   └── ENRICHER
+│       └── Only enriches cells for new field (incremental)
+│
+└── PATH 3: Re-enrich (flagged/pending cells exist)
     │
     └── ENRICHER
-        ├── Input: Candidates + field definitions
-        ├── Action: Bulk enrichment via Lattice
-        └── Output: Structured comparison table
+        └── Only enriches PENDING or FLAGGED cells
 ```
 
 **When Explorer is skipped:**
-- User requested new comparison fields only
-- Existing candidates are re-enriched with updated field definitions
+- User requested new comparison fields only (Path 2)
+- Re-enriching flagged cells after user correction (Path 3)
+
+**Benefits of incremental enrichment:**
+- Adding a new field doesn't re-enrich existing data
+- Failed cells can be retried individually
+- Users can flag incorrect data for re-enrichment
 
 ---
 
@@ -308,10 +328,16 @@ All phases read from and write to a single shared state. There is no isolated me
 | Phase | User Interaction |
 |-------|------------------|
 | INTAKE | Waits for user input each turn |
-| RESEARCH | Runs automatically, no user input required |
+| INTAKE → RESEARCH | Requires button confirmation (Confirm Requirements / Edit) |
+| RESEARCH (Explorer → Enricher) | Requires button confirmation (Enrich Now / Modify Fields) |
 | ADVISE | Waits for user input each turn |
 
-The system presents results and waits for user direction. It does not proceed to a new search without user confirmation.
+The system presents results and waits for user direction. It does not proceed to expensive operations (search, enrichment) without explicit user confirmation via action buttons.
+
+**HITL Checkpoints:**
+1. **Requirements confirmation** — After INTAKE determines requirements are sufficient, shows "Confirm Requirements" / "Edit Requirements" buttons
+2. **Field confirmation** — After Explorer finds candidates, shows "Enrich Now" / "Modify Fields" buttons before Lattice enrichment
+3. **Refinement confirmation** — In ADVISE, may show confirmation for expensive refinement operations
 
 **Implementation:** The router pattern ensures messages reach the correct phase. When a user sends a message:
 1. Router checks `current_phase`
@@ -473,25 +499,46 @@ ALWAYS:
 
 #### Behavior
 
-1. Formulate search queries based on requirements
-2. Execute web searches
+1. Generate 10-15 diverse search queries using multi-angle strategy
+2. Execute web searches in parallel
 3. Parse and filter results for relevance
-4. Extract official product URLs (manufacturer pages, not retailers)
+4. Extract official product URLs using reasoning model (o4-mini)
 5. Determine appropriate comparison fields based on product category
-6. Aim for 20+ candidates; stop at 50 to avoid excessive enrichment cost
+6. Add candidates to Living Table (with deduplication)
+7. Target 30 candidates (configurable via max_products setting)
+
+**Diverse Search Strategy:**
+
+| Angle | Example Query |
+|-------|---------------|
+| REVIEW_SITE | "best electric kettles site:which.co.uk" |
+| REDDIT | "electric kettle recommendation site:reddit.com" |
+| BRAND_CATALOG | "Fellow kettles official" |
+| COMPARISON | "Fellow Stagg vs Bonavita comparison" |
+| BUDGET | "best electric kettle under £50" |
+| FEATURE_FOCUS | "variable temperature kettle" |
+| USE_CASE | "kettle for pour over coffee" |
+| ALTERNATIVES | "Fellow Stagg alternatives" |
+
+**Agentic Web Search:**
+- Uses OpenAI o4-mini reasoning model for multi-step search
+- Model can perform multiple searches and visit URLs to verify sources
+- Filters out retailer and review sites; prioritizes official manufacturer pages
 
 **Field definition logic:**
-- Identify product category (e.g., "electric kettle")
-- Select standard fields for category (e.g., price, capacity, material, wattage)
-- Add fields based on user priorities (e.g., "temperature control" if user mentioned it)
+- Standard fields for all categories: name, price, official_url
+- Category-specific fields based on product type (e.g., capacity, wattage, material for kettles)
+- User-driven fields based on stated priorities (e.g., "temperature_control" if user mentioned it)
+- Only verifiable, objective specs allowed (no subjective ratings, no cost estimates)
 
 #### Acceptance Criteria
 
 - [ ] Candidates match user requirements
 - [ ] Official product URLs (not retailer listings)
-- [ ] No duplicate products
+- [ ] No duplicate products (Living Table deduplication)
 - [ ] Field definitions cover user's stated priorities
-- [ ] 20-50 candidates (quality over quantity beyond this)
+- [ ] Field definitions are verifiable specs (no subjective ratings)
+- [ ] Target 30 candidates (configurable)
 
 #### Error Handling
 
@@ -524,32 +571,35 @@ ALWAYS:
 
 #### Behavior
 
-1. Prepare field definitions CSV for Lattice
-2. Prepare candidates data for enrichment
-3. Call Lattice bulk enrichment
-4. Validate returned data
-5. Handle partial failures gracefully
+1. Get PENDING cells from Living Table via `get_pending_cells()`
+2. Prepare field definitions for Lattice (from Living Table fields)
+3. Call Lattice bulk enrichment for pending cells only
+4. Update each cell in Living Table via `update_cell()`
+5. Handle partial failures at cell level (mark individual cells FAILED)
 
 **Lattice integration:**
 - Uses web-enriched chain for real-time data (prices, availability)
 - Field definitions follow Lattice CSV schema (Category, Field, Prompt, Data_Type)
 - Async processing for performance
+- Supports incremental enrichment (only processes PENDING/FLAGGED cells)
 
 #### Acceptance Criteria
 
-- [ ] All candidates processed (success or marked failed)
-- [ ] Required fields populated for successful candidates
+- [ ] All PENDING cells processed (success or marked FAILED)
+- [ ] Required fields populated for successful cells
 - [ ] Data types match field definitions
-- [ ] At least 80% of candidates successfully enriched
+- [ ] Cell-level status tracking (ENRICHED/FAILED per cell)
+- [ ] At least 80% of cells successfully enriched
 
 #### Error Handling
 
 | Scenario | Response |
 |----------|----------|
-| Lattice fails for single candidate | Mark candidate as incomplete, continue others |
+| Lattice fails for single cell | Mark cell as FAILED with error message, continue others |
 | Lattice fails entirely | Retry once; if still failing, report error to ADVISE |
-| Field returns empty for all candidates | Flag field as unavailable, exclude from comparison |
+| Field returns empty for all rows | Flag field as problematic, report to user |
 | Timeout on large batch | Process in smaller batches, merge results |
+| User flags incorrect data | Mark cell as FLAGGED, re-enrich on next pass |
 
 ---
 
@@ -665,7 +715,13 @@ The structured understanding of what the user wants to buy.
 | Must-haves | Non-negotiable features | "variable temperature", "diesel engine" |
 | Nice-to-haves | Preferred but flexible | "stainless steel", "parking included" |
 | Priorities | What to optimize for | "build quality over price", "fuel efficiency" |
-| Constraints | What to avoid | "no plastic", "not from X brand" |
+| Specifications | Positive filters that narrow search | "second hand", "year 2010-2020", "UK only", "manual transmission" |
+| Constraints | Things to explicitly avoid (negatives only) | "no plastic", "not from X brand", "avoid high mileage" |
+
+**Note on Specifications vs Constraints:**
+- **Specifications** are positive narrowing filters (what to include)
+- **Constraints** are negative exclusions only (what to avoid)
+- This separation improves search query generation
 
 **Note:** Requirements will evolve through conversation. The state should reflect the current understanding, updated as INTAKE learns more.
 
@@ -691,33 +747,66 @@ Products found by Explorer before enrichment.
 
 What dimensions to compare across candidates. These are dynamic based on product category and user priorities.
 
-| Concept | Intent | Example |
+| Category | Intent | Example |
 |---------|--------|---------|
-| Standard fields | Always relevant | Price, rating, official URL |
-| Category fields | Typical for this product type | Capacity, wattage (for kettles) |
-| User-driven fields | Based on stated priorities | Temperature presets (if user mentioned it) |
+| Standard fields | Always included | name, price, official_url |
+| Category fields | Typical for this product type | capacity_litres, wattage (for kettles) |
+| User-driven fields | Based on stated priorities | temperature_presets (if user mentioned it) |
+| Qualification fields | Internal filters (not shown to user) | meets_requirements |
 
 **Key behavior:** Explorer proposes field definitions based on:
 - Product category norms (kettles → capacity, material, wattage)
 - User's stated requirements (user said "build quality" → include material, warranty)
-- What data is likely available
+- What data is verifiable from official sources
 
-The AI should reason: *"For someone comparing kettles who cares about build quality, what fields would help them decide?"*
+**Field constraints:**
+- Only verifiable, objective specifications allowed
+- No subjective ratings (e.g., "handling_rating_out_of_10")
+- No estimated costs (e.g., "maintenance_cost_estimate_per_year")
+- List data type available for feature lists (e.g., "safety_features")
+
+The AI should reason: *"For someone comparing kettles who cares about build quality, what verifiable specs would help them decide?"*
 
 ---
 
-#### 4. Comparison Table
+#### 4. Comparison Table (Living Table Architecture)
 
-The enriched data: candidates × fields.
+The enriched data: candidates × fields. Implemented as a "Living Table" with cell-level tracking for incremental updates.
 
 | Concept | Intent |
 |---------|--------|
-| Rows | One per candidate |
+| Rows | One per candidate (keyed by row_id, with deduplication) |
 | Columns | Field definitions (standard + category + user-driven) |
-| Values | Enriched data from Lattice |
-| Metadata | Success/failure status per candidate |
+| Cells | Individual cell with value, status, timestamp, and source |
+| Metadata | Cell-level success/failure status |
 
-**Note:** This is the primary output artifact. Should be exportable as CSV.
+**Cell Status Tracking:**
+
+| Status | Meaning |
+|--------|---------|
+| PENDING | Cell needs enrichment |
+| ENRICHED | Successfully enriched |
+| FAILED | Enrichment failed (includes error message) |
+| FLAGGED | User flagged for re-enrichment |
+
+**Living Table Operations:**
+
+| Operation | Behavior |
+|-----------|----------|
+| `add_row()` | Adds candidate with deduplication (by normalized name) |
+| `add_field()` | Adds new field, marks all existing rows PENDING for that field |
+| `update_cell()` | Updates specific cell value and status |
+| `get_pending_cells()` | Returns cells needing enrichment (PENDING or FLAGGED) |
+| `to_markdown()` | Renders table for display (truncates to max_rows) |
+| `to_csv()` | Exports full table for download |
+
+**Benefits of Living Table:**
+- Incremental enrichment (only enrich what's changed)
+- Field addition without re-enriching existing data
+- Cell-level error tracking and retry
+- Deduplication prevents duplicate products
+
+**Note:** This is the primary output artifact. Exportable as CSV via the UI.
 
 ---
 
@@ -744,8 +833,19 @@ Flags that control routing and behavior.
 | Current phase | Where we are in the workflow (intake, research, advise) |
 | Need new search | Whether Explorer should run |
 | New fields to add | Fields requested during refinement |
+| Requested fields | Fields requested by user via ADVISE (for incremental addition) |
 | Error state | If something failed, what and why |
 | Advise has presented | Whether ADVISE has shown results to user (for mode switching) |
+
+**HITL Control Flags:**
+
+| Flag | Intent |
+|------|--------|
+| awaiting_requirements_confirmation | Paused for user to confirm requirements |
+| awaiting_fields_confirmation | Paused for user to confirm field definitions before enrichment |
+| awaiting_intent_confirmation | Paused for user to confirm refinement intent |
+| action_choices | Button labels to display to user |
+| pending_* | Temporary storage for data awaiting confirmation |
 
 ---
 
@@ -840,44 +940,54 @@ This section defines the tools and external services agents need to do their wor
 **Purpose:** Find product candidates matching user requirements.
 
 **Input:**
-- Search query (derived from requirements)
+- Search queries (10-15 diverse queries from SearchQueryPlan)
 - Optional: filters, region, result count
 
 **Output:**
 - List of results: title, URL, snippet
+- Source URLs from web_search_call.action
 - Metadata: total results, search source
 
 **Behavior:**
-- Should prioritize official product pages over retailer listings
-- May need multiple queries to gather enough candidates
-- Should filter obviously irrelevant results
+- Uses OpenAI o4-mini reasoning model for agentic search
+- Reasoning model can perform multiple searches and visit pages
+- Prioritizes official manufacturer pages over retailer/review sites
+- URL validation filters out Amazon, eBay, review aggregators
+- Extracts sources from both search results and open_page actions
 
-**Service:** Use existing web search capability (OpenAI Responses API or Tavily via Lattice)
+**Service:** OpenAI Responses API with reasoning model (configurable via lattice_use_reasoning setting)
+
+**Search Strategy Service:**
+- Generates 10-15 diverse queries covering multiple angles
+- Uses category knowledge base for authoritative sources
+- Covers multiple brands and source types per search
 
 ---
 
 ### Lattice Enrichment Tool
 
-**Purpose:** Bulk enrich candidates with structured comparison data.
+**Purpose:** Bulk enrich candidates with structured comparison data via the Living Table.
 
 **Input:**
-- Candidates (name, URL, basic info)
-- Field definitions (what to extract)
+- Living Table with PENDING cells (from state.living_table)
+- Field definitions (already in Living Table)
 
 **Output:**
-- Enriched data per candidate per field
-- Success/failure status per candidate
+- Updated Living Table with cells marked ENRICHED or FAILED
+- Cell-level metadata: value, status, timestamp, source, error
 
 **Behavior:**
-- Uses Lattice library (already built, located at ../lattice)
-- Web-enriched chain for real-time data
+- Uses Lattice library (vendor/lattice submodule)
+- Web-enriched chain for real-time data extraction
 - Async processing for performance
-- Handles partial failures gracefully
+- Incremental enrichment: only processes PENDING/FLAGGED cells
+- Updates cells individually, preserving existing enriched data
 
 **Integration notes:**
 - Field definitions must follow Lattice CSV schema
-- Consider checkpointing for large batches
-- Respect rate limits on underlying APIs
+- Supports incremental field addition (only enriches new column)
+- Handles partial failures at cell level (not row level)
+- Respects max_products setting (default 30)
 
 ---
 
@@ -974,10 +1084,11 @@ This section defines safety boundaries, error handling, and operational constrai
 
 | Constraint | Limit | Rationale |
 |------------|-------|-----------|
-| Max candidates per search | 50 | Lattice enrichment cost |
+| Max candidates per search | 30 (configurable via max_products) | Lattice enrichment cost |
 | Max enrichment retries | 2 | Avoid infinite loops |
 | Search timeout | 30 seconds | User experience |
 | Enrichment timeout | 5 minutes | Large batch tolerance |
+| Search queries per run | 10-15 | Diverse coverage without excessive API calls |
 
 ---
 
