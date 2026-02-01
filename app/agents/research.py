@@ -13,6 +13,7 @@ from app.models.schemas.shortlist import SearchQuery, SearchQueryPlan
 from app.models.state import AgentState
 from app.services.lattice import LatticeService
 from app.services.llm import LLMService
+from app.services.search_strategy import get_search_strategy_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -68,27 +69,22 @@ def _summarize_requirements(requirements: dict) -> str:
     return "; ".join(parts)
 
 
-SEARCH_QUERY_SYSTEM_PROMPT = """You are a product research specialist. Generate 10-15 diverse search queries to find products matching the user's requirements.
-
-Cover multiple angles:
-- Authoritative review sites for the product category
-- Reddit and community discussions
-- Top brand catalogs and official pages
-- Comparison and versus articles
-- Budget-friendly options
-- Feature-specific searches based on user requirements
-- Use case focused searches
-- Alternative/underrated products
-
-Ensure queries will find DISTINCT products with minimal overlap. Include the current year (2025) where relevant."""
-
-
 async def _generate_search_queries(
     llm_service: LLMService,
     requirements: dict,
 ) -> SearchQueryPlan:
     """
-    Generate diverse search queries using LLM.
+    Generate diverse search queries using the SearchStrategyService.
+
+    Uses a category-aware knowledge base to generate queries across:
+    - Review sites (Wirecutter, TechRadar, Which?, etc.)
+    - Reddit communities (r/BuyItForLife, category-specific subreddits)
+    - Top brand catalogs
+    - Comparison articles
+    - Budget and premium options
+    - Feature-focused searches
+    - Use case searches
+    - Alternative/underrated product searches
 
     Args:
         llm_service: LLM service instance
@@ -97,39 +93,41 @@ async def _generate_search_queries(
     Returns:
         SearchQueryPlan with 10-15 diverse queries
     """
-    product_type = requirements.get("product_type", "product")
-    budget_max = requirements.get("budget_max")
-    must_haves = requirements.get("must_haves", [])
-    nice_to_haves = requirements.get("nice_to_haves", [])
-    priorities = requirements.get("priorities", [])
-
-    user_prompt = f"""Generate search queries for: {product_type}
-
-Requirements:
-- Budget: {"under £" + str(budget_max) if budget_max else "No limit"}
-- Must have: {', '.join(must_haves) if must_haves else 'None specified'}
-- Nice to have: {', '.join(nice_to_haves) if nice_to_haves else 'None specified'}
-- Priorities: {', '.join(priorities) if priorities else 'None specified'}
-
-Generate 10-15 diverse search queries covering review sites, Reddit, brand catalogs, comparisons, budget options, and feature-focused searches."""
-
     try:
-        result = await llm_service.generate_structured(
-            messages=[HumanMessage(content=user_prompt)],
-            schema=SearchQueryPlan,
-            system_prompt=SEARCH_QUERY_SYSTEM_PROMPT,
+        # Use the search strategy service with category knowledge base
+        search_service = get_search_strategy_service()
+        result = await search_service.generate_queries(requirements, llm_service)
+
+        # Convert to SearchQueryPlan from shortlist schema
+        queries = [
+            SearchQuery(
+                query=q.query,
+                angle=q.angle,
+                expected_results=q.expected_results,
+            )
+            for q in result.queries
+        ]
+
+        plan = SearchQueryPlan(
+            queries=queries,
+            strategy_notes=result.strategy_notes,
+            brands_covered=result.brands_covered,
+            sources_covered=result.sources_covered,
         )
 
-        # Log summary
-        angles = [q.angle for q in result.queries]
+        # Log detailed breakdown
+        angles = [q.angle for q in queries]
         angle_counts = {a: angles.count(a) for a in set(angles)}
-        logger.info(f"Generated {len(result.queries)} diverse queries")
+        logger.info(f"Generated {len(queries)} diverse queries")
         logger.info(f"Query angles: {angle_counts}")
+        logger.info(f"Brands covered: {result.brands_covered}")
 
-        return result
+        return plan
 
     except Exception as e:
-        logger.warning(f"Search query generation failed, using fallback: {e}")
+        logger.warning(f"Search strategy generation failed, using fallback: {e}")
+        product_type = requirements.get("product_type", "product")
+        budget_max = requirements.get("budget_max")
         budget_str = f" under £{budget_max}" if budget_max else ""
 
         fallback_queries = [

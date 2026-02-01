@@ -1,0 +1,352 @@
+# Product Category Knowledge Base
+# Maps product categories to authoritative sources, communities, and top brands
+
+categories:
+  # ============================================================================
+  # ELECTRONICS
+  # ============================================================================
+
+  laptop:
+    aliases: ["laptops", "notebook", "notebooks", "ultrabook", "chromebook"]
+    review_sites:
+      - "laptopmag.com"
+      - "notebookcheck.net"
+      - "techradar.com"
+      - "tomsguide.com"
+      - "pcmag.com"
+      - "theverge.com"
+    subreddits:
+      - "r/laptops"
+      - "r/SuggestALaptop"
+      - "r/buildapc"
+      - "r/thinkpad"
+      - "r/macbook"
+    top_brands:
+      - "Apple"
+      - "Dell"
+      - "Lenovo"
+      - "HP"
+      - "ASUS"
+      - "Acer"
+      - "Microsoft"
+      - "Razer"
+      - "MSI"
+      - "Framework"
+    price_tiers:
+      budget: 500
+      mid: 1000
+      premium: 2000
+    key_specs:
+      - "processor"
+      - "RAM"
+      - "storage"
+      - "screen size"
+      - "battery life"
+      - "weight"
+    use_cases:
+      - "programming"
+      - "gaming"
+      - "video editing"
+      - "business"
+      - "students"
+      - "travel"
+
+  headphones:
+    aliases: ["headphone", "earphones", "earbuds", "IEMs", "over-ear", "on-ear"]
+    review_sites:
+      - "rtings.com"
+      - "head-fi.org"
+      - "audiosciencereview.com"
+      - "soundguys.com"
+      - "whathifi.com"
+      - "cnet.com"
+    subreddits:
+      - "r/headphones"
+      - "r/HeadphoneAdvice"
+      - "r/audiophile"
+      - "r/budgetaudiophile"
+    top_brands:
+      - "Sony"
+      - "Bose"
+      - "Sennheiser"
+      - "Audio-Technica"
+      - "Beyerdynamic"
+      - "AKG"
+      - "Shure"
+      - "Focal"
+      - "Hifiman"
+      - "Apple"
+      - "Samsung"
+    price_tiers:
+      budget: 50
+      mid: 150
+      premium: 400
+    key_specs:
+      - "driver type"
+      - "frequency response"
+      - "impedance"
+      - "noise cancellation"
+      - "wireless"
+      - "battery life"
+    use_cases:
+      - "commuting"
+      - "gaming"
+      - "studio"
+      - "audiophile"
+      - "workout"
+      - "office"
+
+  keyboard:
+    aliases: ["keyboards", "mechanical keyboard", "wireless keyboard"]
+    review_sites:
+      - "rtings.com"
+      - "tomshardware.com"
+      - "switchandclick.com"
+    subreddits:
+      - "r/MechanicalKeyboards"
+      - "r/keyboards"
+      - "r/ErgoMechKeyboards"
+    top_brands:
+      - "Keychron"
+      - "Ducky"
+      - "Leopold"
+      - "Varmilo"
+      - "HHKB"
+      - "Logitech"
+      - "Razer"
+      - "Corsair"
+      - "SteelSeries"
+    price_tiers:
+      budget: 50
+      mid: 100
+      premium: 200
+    key_specs:
+      - "switch type"
+      - "layout"
+      - "connectivity"
+      - "keycaps"
+    use_cases:
+      - "gaming"
+      - "typing"
+      - "programming"
+      - "office"
+
+  # ============================================================================
+  # HOME APPLIANCES
+  # ============================================================================
+
+  kettle:
+    aliases: ["kettles", "electric kettle", "tea kettle", "water boiler"]
+    review_sites:
+      - "which.co.uk"
+      - "goodhousekeeping.com"
+      - "reviewed.com"
+      - "expertreviews.co.uk"
+      - "techradar.com"
+      - "idealhome.co.uk"
+    subreddits:
+      - "r/Appliances"
+      - "r/tea"
+      - "r/Coffee"
+      - "r/BuyItForLife"
+      - "r/UKPersonalFinance"
+    top_brands:
+      - "Russell Hobbs"
+      - "Breville"
+      - "De'Longhi"
+      - "Morphy Richards"
+      - "Swan"
+      - "Dualit"
+      - "KitchenAid"
+      - "Smeg"
+      - "Bosch"
+      - "Tefal"
+    price_tiers:
+      budget: 25
+      mid: 50
+      premium: 100
+    key_specs:
+      - "capacity"
+      - "wattage"
+      - "material"
+      - "temperature control"
+      - "boil time"
+      - "noise level"
+    use_cases:
+      - "tea"
+      - "coffee"
+      - "quick boil"
+      - "temperature precision"
+    uk_retailers:
+      - "currys.co.uk"
+      - "argos.co.uk"
+      - "johnlewis.com"
+      - "ao.com"
+
+  vacuum:
+    aliases: ["vacuums", "vacuum cleaner", "hoover", "robot vacuum"]
+    review_sites:
+      - "which.co.uk"
+      - "rtings.com"
+      - "goodhousekeeping.com"
+      - "reviewed.com"
+      - "techradar.com"
+    subreddits:
+      - "r/VacuumCleaners"
+      - "r/Appliances"
+      - "r/BuyItForLife"
+      - "r/RobotVacuums"
+    top_brands:
+      - "Dyson"
+      - "Shark"
+      - "Miele"
+      - "Henry"
+      - "Tineco"
+      - "Roborock"
+      - "iRobot"
+      - "Samsung"
+      - "Bissell"
+      - "Vax"
+    price_tiers:
+      budget: 100
+      mid: 250
+      premium: 500
+    key_specs:
+      - "suction power"
+      - "weight"
+      - "cordless"
+      - "battery life"
+      - "dustbin capacity"
+    use_cases:
+      - "pet hair"
+      - "hard floors"
+      - "carpet"
+      - "small spaces"
+
+  coffee_machine:
+    aliases: ["coffee maker", "espresso machine", "coffee machines"]
+    review_sites:
+      - "which.co.uk"
+      - "goodhousekeeping.com"
+      - "reviewed.com"
+      - "techradar.com"
+      - "homegrounds.co"
+    subreddits:
+      - "r/Coffee"
+      - "r/espresso"
+      - "r/BuyItForLife"
+    top_brands:
+      - "De'Longhi"
+      - "Sage"
+      - "Nespresso"
+      - "Gaggia"
+      - "Breville"
+      - "Jura"
+      - "Smeg"
+      - "Krups"
+    price_tiers:
+      budget: 100
+      mid: 300
+      premium: 700
+    key_specs:
+      - "type"
+      - "pressure"
+      - "grinder"
+      - "milk frother"
+    use_cases:
+      - "espresso"
+      - "filter coffee"
+      - "pod coffee"
+
+  # ============================================================================
+  # DEFAULT CATEGORY
+  # ============================================================================
+
+  default:
+    review_sites:
+      - "wirecutter.com"
+      - "consumerreports.org"
+      - "which.co.uk"
+      - "reviewed.com"
+      - "techradar.com"
+      - "tomsguide.com"
+    subreddits:
+      - "r/BuyItForLife"
+      - "r/Frugal"
+    top_brands: []
+    price_tiers:
+      budget: 50
+      mid: 150
+      premium: 400
+
+# ============================================================================
+# QUERY TEMPLATES
+# ============================================================================
+
+query_templates:
+  review_sites:
+    template: "best {product_type} {year} site:{site}"
+    description: "Search authoritative review sites"
+
+  reddit_community:
+    template: "{product_type} recommendations {subreddit} {year}"
+    description: "Search Reddit communities"
+
+  brand_catalog:
+    template: "{brand} {product_type} range official"
+    description: "Search brand's product lineup"
+
+  comparison:
+    template: "{product_type} comparison vs {year}"
+    description: "Find comparison articles"
+
+  budget:
+    template: "best budget {product_type} under {currency}{price} {year}"
+    description: "Find budget-friendly options"
+
+  premium:
+    template: "best premium {product_type} professional {year}"
+    description: "Find high-end options"
+
+  feature_focus:
+    template: "{product_type} {feature} best {year}"
+    description: "Search for specific feature"
+
+  use_case:
+    template: "best {product_type} for {use_case} {year}"
+    description: "Search by intended use"
+
+  alternatives:
+    template: "{product_type} alternatives underrated hidden gems {year}"
+    description: "Find lesser-known options"
+
+# ============================================================================
+# REGIONAL SETTINGS
+# ============================================================================
+
+regions:
+  uk:
+    currency: "£"
+    retailers:
+      - "currys.co.uk"
+      - "argos.co.uk"
+      - "johnlewis.com"
+      - "ao.com"
+      - "amazon.co.uk"
+    review_sites:
+      - "which.co.uk"
+      - "expertreviews.co.uk"
+      - "trustedreviews.com"
+    search_suffix: "UK"
+
+  us:
+    currency: "$"
+    retailers:
+      - "amazon.com"
+      - "bestbuy.com"
+      - "walmart.com"
+    review_sites:
+      - "consumerreports.org"
+      - "wirecutter.com"
+      - "cnet.com"
+    search_suffix: "USA"
