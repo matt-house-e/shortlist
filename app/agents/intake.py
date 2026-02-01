@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 INTAKE_PROMPT_PATH = PROMPTS_DIR / "intake.yaml"
 
-with open(INTAKE_PROMPT_PATH) as f:
+with open(INTAKE_PROMPT_PATH, encoding="utf-8") as f:
     INTAKE_PROMPTS = yaml.safe_load(f)
 
 INTAKE_SYSTEM_PROMPT = INTAKE_PROMPTS["system_prompt"]

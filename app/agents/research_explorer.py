@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 EXPLORER_PROMPT_PATH = PROMPTS_DIR / "explorer.yaml"
 
-with open(EXPLORER_PROMPT_PATH) as f:
+with open(EXPLORER_PROMPT_PATH, encoding="utf-8") as f:
     EXPLORER_PROMPTS = yaml.safe_load(f)
 
 # System prompt for web search to extract product candidates

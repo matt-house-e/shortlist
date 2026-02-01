@@ -63,7 +63,7 @@ class SearchStrategyService:
     def _load_categories(self) -> dict:
         """Load the product categories knowledge base."""
         try:
-            with open(CATEGORIES_PATH) as f:
+            with open(CATEGORIES_PATH, encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except Exception as e:
             logger.error(f"Failed to load categories: {e}")
@@ -72,7 +72,7 @@ class SearchStrategyService:
     def _load_strategy(self) -> dict:
         """Load the search strategy configuration."""
         try:
-            with open(STRATEGY_PATH) as f:
+            with open(STRATEGY_PATH, encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except Exception as e:
             logger.error(f"Failed to load strategy config: {e}")

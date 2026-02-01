@@ -59,7 +59,7 @@ class FieldGenerationService:
     def _load_config(self) -> dict:
         """Load the field generation configuration."""
         try:
-            with open(FIELD_GEN_PATH) as f:
+            with open(FIELD_GEN_PATH, encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except Exception as e:
             logger.error(f"Failed to load field generation config: {e}")
