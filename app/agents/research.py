@@ -13,7 +13,6 @@ from app.models.schemas.shortlist import SearchQuery, SearchQueryPlan
 from app.models.state import AgentState
 from app.services.lattice import LatticeService
 from app.services.llm import LLMService
-from app.services.search_strategy import get_search_strategy_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -69,22 +68,27 @@ def _summarize_requirements(requirements: dict) -> str:
     return "; ".join(parts)
 
 
+SEARCH_QUERY_SYSTEM_PROMPT = """You are a product research specialist. Generate 10-15 diverse search queries to find products matching the user's requirements.
+
+Cover multiple angles:
+- Authoritative review sites for the product category
+- Reddit and community discussions
+- Top brand catalogs and official pages
+- Comparison and versus articles
+- Budget-friendly options
+- Feature-specific searches based on user requirements
+- Use case focused searches
+- Alternative/underrated products
+
+Ensure queries will find DISTINCT products with minimal overlap. Include the current year (2025) where relevant."""
+
+
 async def _generate_search_queries(
     llm_service: LLMService,
     requirements: dict,
 ) -> SearchQueryPlan:
     """
-    Use the SearchStrategyService to generate diverse search queries.
-
-    This now uses a category-aware knowledge base to generate queries across:
-    - Review sites (Wirecutter, TechRadar, Which?, etc.)
-    - Reddit communities (r/BuyItForLife, category-specific subreddits)
-    - Top brand catalogs
-    - Comparison articles
-    - Budget and premium options
-    - Feature-focused searches
-    - Use case searches
-    - Alternative/underrated product searches
+    Generate diverse search queries using LLM.
 
     Args:
         llm_service: LLM service instance
@@ -93,43 +97,39 @@ async def _generate_search_queries(
     Returns:
         SearchQueryPlan with 10-15 diverse queries
     """
+    product_type = requirements.get("product_type", "product")
+    budget_max = requirements.get("budget_max")
+    must_haves = requirements.get("must_haves", [])
+    nice_to_haves = requirements.get("nice_to_haves", [])
+    priorities = requirements.get("priorities", [])
+
+    user_prompt = f"""Generate search queries for: {product_type}
+
+Requirements:
+- Budget: {"under £" + str(budget_max) if budget_max else "No limit"}
+- Must have: {', '.join(must_haves) if must_haves else 'None specified'}
+- Nice to have: {', '.join(nice_to_haves) if nice_to_haves else 'None specified'}
+- Priorities: {', '.join(priorities) if priorities else 'None specified'}
+
+Generate 10-15 diverse search queries covering review sites, Reddit, brand catalogs, comparisons, budget options, and feature-focused searches."""
+
     try:
-        # Use the new search strategy service
-        search_service = get_search_strategy_service()
-        result = await search_service.generate_queries(requirements, llm_service)
-
-        # Convert to SearchQueryPlan from shortlist schema
-        queries = [
-            SearchQuery(
-                query=q.query,
-                angle=q.angle,
-                expected_results=q.expected_results,
-            )
-            for q in result.queries
-        ]
-
-        plan = SearchQueryPlan(
-            queries=queries,
-            strategy_notes=result.strategy_notes,
-            brands_covered=result.brands_covered,
-            sources_covered=result.sources_covered,
+        result = await llm_service.generate_structured(
+            messages=[HumanMessage(content=user_prompt)],
+            schema=SearchQueryPlan,
+            system_prompt=SEARCH_QUERY_SYSTEM_PROMPT,
         )
 
-        # Log detailed breakdown
-        angles = [q.angle for q in queries]
+        # Log summary
+        angles = [q.angle for q in result.queries]
         angle_counts = {a: angles.count(a) for a in set(angles)}
-        logger.info(f"Generated {len(queries)} diverse queries")
+        logger.info(f"Generated {len(result.queries)} diverse queries")
         logger.info(f"Query angles: {angle_counts}")
-        logger.info(f"Brands covered: {result.brands_covered}")
-        logger.info(f"Strategy: {result.strategy_notes}")
 
-        return plan
+        return result
 
     except Exception as e:
-        logger.warning(f"Search strategy generation failed, using fallback: {e}")
-        # Fallback to basic queries
-        product_type = requirements.get("product_type", "product")
-        budget_max = requirements.get("budget_max")
+        logger.warning(f"Search query generation failed, using fallback: {e}")
         budget_str = f" under £{budget_max}" if budget_max else ""
 
         fallback_queries = [
@@ -334,6 +334,9 @@ def generate_field_definitions(product_type: str, requirements: dict) -> list[di
     """
     Generate field definitions based on product category and user requirements.
 
+    The LLM determines appropriate category-specific fields based on its knowledge
+    of the product type. Standard fields and qualification fields are always included.
+
     Args:
         product_type: Type of product (e.g., "electric kettle", "laptop")
         requirements: User requirements dict
@@ -370,76 +373,6 @@ def generate_field_definitions(product_type: str, requirements: dict) -> list[di
             "data_type": "string",
         },
     ]
-
-    # Category-specific fields
-    if "kettle" in product_type.lower():
-        fields.extend(
-            [
-                {
-                    "category": "category",
-                    "name": "capacity",
-                    "prompt": "Extract capacity in liters",
-                    "data_type": "number",
-                },
-                {
-                    "category": "category",
-                    "name": "wattage",
-                    "prompt": "Extract power rating in watts",
-                    "data_type": "number",
-                },
-                {
-                    "category": "category",
-                    "name": "material",
-                    "prompt": "Extract primary material (plastic, stainless steel, glass)",
-                    "data_type": "string",
-                },
-            ]
-        )
-
-        # User-driven fields based on priorities
-        priorities = requirements.get("priorities", [])
-        if (
-            "temperature" in str(priorities).lower()
-            or "temperature control" in str(requirements.get("must_haves", [])).lower()
-        ):
-            fields.append(
-                {
-                    "category": "user_driven",
-                    "name": "temperature_control",
-                    "prompt": "Does it have variable temperature control?",
-                    "data_type": "boolean",
-                }
-            )
-
-    elif "laptop" in product_type.lower():
-        fields.extend(
-            [
-                {
-                    "category": "category",
-                    "name": "processor",
-                    "prompt": "Extract CPU model",
-                    "data_type": "string",
-                },
-                {
-                    "category": "category",
-                    "name": "ram",
-                    "prompt": "Extract RAM capacity in GB",
-                    "data_type": "number",
-                },
-                {
-                    "category": "category",
-                    "name": "storage",
-                    "prompt": "Extract storage capacity and type",
-                    "data_type": "string",
-                },
-                {
-                    "category": "category",
-                    "name": "screen_size",
-                    "prompt": "Extract screen size in inches",
-                    "data_type": "number",
-                },
-            ]
-        )
 
     # Add qualification fields for requirement matching
     requirements_summary = _summarize_requirements(requirements)
