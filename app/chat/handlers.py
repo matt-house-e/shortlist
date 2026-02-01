@@ -5,7 +5,11 @@ import uuid
 import chainlit as cl
 from chainlit.data.chainlit_data_layer import ChainlitDataLayer
 
-from app.agents.workflow import create_workflow, process_message_with_state
+from app.agents.workflow import (
+    WorkflowResult,
+    create_workflow,
+    process_message_with_state,
+)
 from app.auth.password_auth import password_auth_callback
 from app.config import get_settings
 from app.services.llm import LLMService
@@ -22,6 +26,55 @@ logger = get_logger(__name__)
 # =============================================================================
 # Citation Formatting
 # =============================================================================
+
+
+async def render_action_buttons(result: WorkflowResult, message_content: str) -> None:
+    """
+    Render action buttons if the workflow result has action choices.
+
+    Args:
+        result: WorkflowResult containing potential HITL state
+        message_content: The message content to display with buttons
+    """
+    action_choices = result.action_choices
+    if not action_choices:
+        return
+
+    # Determine checkpoint type from HITL flags
+    checkpoint = None
+    if result.awaiting_requirements_confirmation:
+        checkpoint = "requirements"
+    elif result.awaiting_fields_confirmation:
+        checkpoint = "fields"
+    elif result.awaiting_intent_confirmation:
+        checkpoint = "intent"
+
+    if not checkpoint:
+        return
+
+    # Create action buttons
+    actions = [
+        cl.Action(
+            name="hitl_action",
+            label=choice,
+            payload={"checkpoint": checkpoint, "choice": choice},
+        )
+        for choice in action_choices
+    ]
+
+    # Store current actions for cleanup
+    cl.user_session.set("current_actions", actions)
+
+    # Send message with action buttons
+    await cl.Message(content=message_content, actions=actions, author="Assistant").send()
+
+
+async def remove_current_actions() -> None:
+    """Remove any currently displayed action buttons."""
+    current_actions = cl.user_session.get("current_actions", [])
+    for action in current_actions:
+        await action.remove()
+    cl.user_session.set("current_actions", [])
 
 
 def format_response_with_citations(content: str, citations: list[dict]) -> str:
@@ -84,6 +137,32 @@ async def auth_callback(username: str, password: str) -> cl.User | None:
 
 
 # =============================================================================
+# Starters (ChatGPT-style welcome page)
+# =============================================================================
+
+STARTER_DIRECT_RESPONSES = {
+    "Help me find a product to buy": "Great! What type of product are you looking for?",
+    "I want to compare different options for something I'm buying": "I can help you compare options. What product category are you researching?",
+    "I have a budget and need recommendations": "Happy to help you find options within your budget. What are you shopping for, and what's your budget range?",
+    "I need help deciding what to buy": "I'll help you make a decision. What kind of product are you considering?",
+}
+
+
+@cl.set_starters
+async def set_starters():
+    """Define starter prompts for the welcome screen."""
+    return [
+        cl.Starter(label="Find a Product", message="Help me find a product to buy"),
+        cl.Starter(
+            label="Compare Options",
+            message="I want to compare different options for something I'm buying",
+        ),
+        cl.Starter(label="Budget Shopping", message="I have a budget and need recommendations"),
+        cl.Starter(label="Quick Research", message="I need help deciding what to buy"),
+    ]
+
+
+# =============================================================================
 # Chat Lifecycle
 # =============================================================================
 
@@ -111,17 +190,71 @@ async def on_chat_start():
 
     logger.info(f"Session initialized: workflow_id={workflow_id}, thread_id={thread_id}")
 
-    # Send welcome message (optional)
-    await cl.Message(
-        content="Hello! How can I assist you today?",
-        author="Assistant",
-    ).send()
+
+@cl.action_callback("hitl_action")
+async def on_hitl_action(action: cl.Action):
+    """Handle all HITL button clicks."""
+    logger.info(f"HITL action clicked: {action.payload}")
+
+    # Remove current action buttons
+    await remove_current_actions()
+
+    # Get workflow from session
+    workflow = cl.user_session.get("workflow")
+    if not workflow:
+        await cl.Message(content="Session error. Please refresh the page.").send()
+        return
+
+    # Get user context
+    user = cl.user_session.get("user")
+    user_id = user.identifier if user else "anonymous"
+    session_id = cl.user_session.get("id", "unknown")
+
+    # Build synthetic HITL message
+    checkpoint = action.payload.get("checkpoint")
+    choice = action.payload.get("choice")
+    synthetic_message = f"[HITL:{checkpoint}:{choice}]"
+
+    logger.info(f"Processing HITL synthetic message: {synthetic_message}")
+
+    # Create status indicator
+    async with cl.Step(name="Processing", type="run") as step:
+        step.input = f"Button: {choice}"
+
+        # Process through workflow
+        result = await process_message_with_state(
+            workflow=workflow,
+            message=synthetic_message,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        step.output = result.content
+
+    # Format response with citations if available
+    response_content = format_response_with_citations(result.content, result.citations)
+
+    # Check if we need to render action buttons
+    if result.action_choices:
+        await render_action_buttons(result, response_content)
+    else:
+        await cl.Message(content=response_content, author="Assistant").send()
 
 
 @cl.on_message
 async def on_message(message: cl.Message):
     """Handle incoming user messages."""
     logger.info(f"Received message: {message.content[:100]}...")
+
+    # Remove any existing action buttons (non-blocking pattern)
+    await remove_current_actions()
+
+    # Handle starter direct responses (skip LLM for faster feedback)
+    if message.content in STARTER_DIRECT_RESPONSES:
+        await cl.Message(
+            content=STARTER_DIRECT_RESPONSES[message.content], author="Assistant"
+        ).send()
+        return
 
     # Sanitize user input
     sanitized_content = sanitize_input(message.content)
@@ -157,8 +290,11 @@ async def on_message(message: cl.Message):
     # Format response with citations if available
     response_content = format_response_with_citations(result.content, result.citations)
 
-    # Send response
-    await cl.Message(content=response_content, author="Assistant").send()
+    # Check if we need to render action buttons
+    if result.action_choices:
+        await render_action_buttons(result, response_content)
+    else:
+        await cl.Message(content=response_content, author="Assistant").send()
 
 
 @cl.on_chat_end

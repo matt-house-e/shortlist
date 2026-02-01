@@ -1,17 +1,12 @@
-# Welcome! 👋
+# Welcome to Shortlist
 
-This is your **Agent Template** - a multi-agent conversational system.
+Your AI-powered product research assistant. Tell me what you're looking to buy, and I'll help you find and compare the best options.
 
-## Getting Started
+## How It Works
 
-Simply type your message below to begin a conversation with the AI assistant.
-
-## Features
-
-- 💬 Natural language conversation
-- 📎 File upload support
-- 🔄 Multi-turn dialogue
-- 🧠 Intelligent routing
+1. **Tell me what you want** - Describe the product you're looking for
+2. **I'll ask questions** - To understand your priorities and budget
+3. **Get a curated shortlist** - With comparisons and recommendations
 
 ---
 

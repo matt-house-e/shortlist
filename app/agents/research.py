@@ -587,31 +587,241 @@ async def enricher_step(
     return comparison_table
 
 
+def _format_fields_for_display(field_definitions: list[dict]) -> str:
+    """
+    Format field definitions for user display in HITL confirmation.
+
+    Args:
+        field_definitions: List of field definition dicts
+
+    Returns:
+        Formatted string for display
+    """
+    # Group by category
+    standard = []
+    category_specific = []
+    user_driven = []
+
+    for field in field_definitions:
+        name = field.get("name", "unknown")
+        cat = field.get("category", "standard")
+
+        # Skip qualification fields (internal)
+        if cat == "qualification":
+            continue
+
+        if cat == "standard":
+            standard.append(name)
+        elif cat == "category":
+            category_specific.append(name)
+        else:
+            user_driven.append(name)
+
+    parts = []
+    if standard:
+        parts.append(f"**Standard fields:** {', '.join(standard)}")
+    if category_specific:
+        parts.append(f"**Category-specific:** {', '.join(category_specific)}")
+    if user_driven:
+        parts.append(f"**Based on your priorities:** {', '.join(user_driven)}")
+
+    return "\n".join(parts) if parts else "Standard comparison fields"
+
+
+def _parse_hitl_choice(content: str) -> str | None:
+    """
+    Parse the choice from a HITL message.
+
+    Args:
+        content: Message content like "[HITL:fields:Enrich Now]"
+
+    Returns:
+        The choice string or None if invalid
+    """
+    if not content.startswith("[HITL:"):
+        return None
+    try:
+        inner = content[6:-1]  # Remove [HITL: and ]
+        parts = inner.split(":", 1)
+        if len(parts) == 2:
+            return parts[1]
+    except Exception:
+        pass
+    return None
+
+
+def _clear_hitl_flags() -> dict:
+    """Return a dict of cleared HITL flags for state updates."""
+    return {
+        "awaiting_requirements_confirmation": False,
+        "awaiting_fields_confirmation": False,
+        "awaiting_intent_confirmation": False,
+        "action_choices": None,
+        "pending_requirements_summary": None,
+        "pending_field_definitions": None,
+        "pending_intent": None,
+        "pending_intent_details": None,
+    }
+
+
 async def research_node(state: AgentState) -> Command:
     """
     RESEARCH node - Find product candidates and build comparison table.
 
-    This node runs automatically without user interaction. It contains two sub-steps:
+    This node has two sub-steps with HITL confirmation between them:
     1. Explorer (conditional) - Find candidates via web search
-    2. Enricher (always) - Build comparison table via Lattice
+    2. [HITL checkpoint] - User confirms fields before enrichment
+    3. Enricher - Build comparison table via Lattice
+
+    HITL Flow:
+    - After Explorer finds candidates, shows "Enrich Now" / "Modify Fields" buttons
+    - User must confirm before proceeding to expensive Lattice enrichment
 
     Args:
         state: Current workflow state
 
     Returns:
-        Command with state updates and routing to ADVISE
+        Command with state updates and routing
     """
     logger.info("RESEARCH node processing")
 
+    messages = state.get("messages", [])
     need_new_search = state.get("need_new_search", True)
     candidates = state.get("candidates", [])
-    field_definitions = []
+    awaiting_fields = state.get("awaiting_fields_confirmation", False)
+
+    # Check for HITL action at start
+    if messages:
+        last_message = messages[-1]
+        if hasattr(last_message, "content") and last_message.content.startswith("[HITL:fields:"):
+            choice = _parse_hitl_choice(last_message.content)
+            logger.info(f"RESEARCH: HITL action received - {choice}")
+
+            if choice == "Enrich Now":
+                # User confirmed, proceed to enrichment
+                logger.info("RESEARCH: User confirmed fields, running Enricher")
+
+                # Get pending field definitions from state
+                pending_fields = state.get("pending_field_definitions", [])
+                existing_candidates = state.get("candidates", [])
+
+                if not pending_fields or not existing_candidates:
+                    logger.error("RESEARCH: Missing pending data for enrichment")
+                    return Command(
+                        update={
+                            "messages": [AIMessage(content="Something went wrong. Let me restart the search.")],
+                            "current_node": "research",
+                            "current_phase": "research",
+                            **_clear_hitl_flags(),
+                        },
+                        goto="research",
+                    )
+
+                try:
+                    # Run enricher with pending data
+                    comparison_table = await enricher_step(existing_candidates, pending_fields)
+
+                    num_candidates = len(comparison_table.get("candidates", []))
+                    response_msg = f"Research complete! I found {num_candidates} products to compare."
+
+                    logger.info("RESEARCH: Enrichment complete, transitioning to ADVISE")
+
+                    return Command(
+                        update={
+                            "current_node": "research",
+                            "current_phase": "advise",
+                            "comparison_table": comparison_table,
+                            "need_new_search": False,
+                            "advise_has_presented": False,
+                            "messages": [AIMessage(content=response_msg)],
+                            **_clear_hitl_flags(),
+                        },
+                        goto="advise",
+                    )
+                except Exception:
+                    logger.exception("RESEARCH enrichment error")
+                    return Command(
+                        update={
+                            "messages": [AIMessage(content="I encountered an issue during enrichment.")],
+                            "current_node": "research",
+                            "current_phase": "error",
+                            **_clear_hitl_flags(),
+                        },
+                        goto="advise",
+                    )
+            else:
+                # User wants to modify fields
+                logger.info("RESEARCH: User wants to modify fields")
+                return Command(
+                    update={
+                        "messages": [AIMessage(content="What fields would you like me to add or change for the comparison? For example, you could ask for 'energy efficiency', 'warranty length', or 'weight'.")],
+                        "current_node": "research",
+                        "current_phase": "research",
+                        **_clear_hitl_flags(),
+                    },
+                    goto="__end__",
+                )
+
+    # Check if we're awaiting confirmation (came back with non-HITL message)
+    if awaiting_fields and messages:
+        # User typed something instead of clicking button - treat as field modification request
+        last_message = messages[-1]
+        if hasattr(last_message, "content") and not last_message.content.startswith("[HITL:"):
+            logger.info("RESEARCH: User provided text while awaiting fields confirmation")
+            # TODO: In future, parse user's field requests and add to field definitions
+            # For now, just proceed with enrichment
+            pending_fields = state.get("pending_field_definitions", [])
+            existing_candidates = state.get("candidates", [])
+
+            if pending_fields and existing_candidates:
+                try:
+                    comparison_table = await enricher_step(existing_candidates, pending_fields)
+                    num_candidates = len(comparison_table.get("candidates", []))
+                    response_msg = f"Research complete! I found {num_candidates} products to compare."
+
+                    return Command(
+                        update={
+                            "current_node": "research",
+                            "current_phase": "advise",
+                            "comparison_table": comparison_table,
+                            "need_new_search": False,
+                            "advise_has_presented": False,
+                            "messages": [AIMessage(content=response_msg)],
+                            **_clear_hitl_flags(),
+                        },
+                        goto="advise",
+                    )
+                except Exception:
+                    logger.exception("RESEARCH enrichment error")
 
     try:
         # Step 1: Explorer (if needed)
         if need_new_search or not candidates:
             logger.info("Running Explorer sub-step")
             candidates, field_definitions = await explorer_step(state)
+
+            # After Explorer completes, pause for HITL confirmation
+            fields_summary = _format_fields_for_display(field_definitions)
+            confirmation_message = (
+                f"Found {len(candidates)} products!\n\n"
+                f"I'll compare them on:\n{fields_summary}\n\n"
+                f"Ready to analyze these products?"
+            )
+
+            logger.info("RESEARCH: Explorer complete, awaiting HITL confirmation for fields")
+
+            return Command(
+                update={
+                    "messages": [AIMessage(content=confirmation_message)],
+                    "current_node": "research",
+                    "current_phase": "research",
+                    "candidates": candidates,
+                    "pending_field_definitions": field_definitions,
+                    "awaiting_fields_confirmation": True,
+                    "action_choices": ["Enrich Now", "Modify Fields"],
+                },
+                goto="__end__",  # Return control to user for HITL
+            )
         else:
             logger.info("Skipping Explorer (re-enrichment mode)")
             # Use existing candidates and field definitions
@@ -625,28 +835,29 @@ async def research_node(state: AgentState) -> Command:
                 product_type = requirements.get("product_type", "product")
                 field_definitions = generate_field_definitions(product_type, requirements)
 
-        # Step 2: Enricher (always)
-        logger.info("Running Enricher sub-step")
-        comparison_table = await enricher_step(candidates, field_definitions)
+            # Step 2: Enricher (always when in re-enrichment mode)
+            logger.info("Running Enricher sub-step")
+            comparison_table = await enricher_step(candidates, field_definitions)
 
-        # Build response message
-        num_candidates = len(comparison_table.get("candidates", []))
-        response_msg = f"Research complete! I found {num_candidates} products to compare."
+            # Build response message
+            num_candidates = len(comparison_table.get("candidates", []))
+            response_msg = f"Research complete! I found {num_candidates} products to compare."
 
-        logger.info("RESEARCH complete, transitioning to ADVISE")
+            logger.info("RESEARCH complete, transitioning to ADVISE")
 
-        return Command(
-            update={
-                "current_node": "research",
-                "current_phase": "advise",
-                "candidates": candidates,
-                "comparison_table": comparison_table,
-                "need_new_search": False,
-                "advise_has_presented": False,  # Reset so ADVISE presents results
-                "messages": [AIMessage(content=response_msg)],
-            },
-            goto="advise",
-        )
+            return Command(
+                update={
+                    "current_node": "research",
+                    "current_phase": "advise",
+                    "candidates": candidates,
+                    "comparison_table": comparison_table,
+                    "need_new_search": False,
+                    "advise_has_presented": False,
+                    "messages": [AIMessage(content=response_msg)],
+                    **_clear_hitl_flags(),
+                },
+                goto="advise",
+            )
 
     except Exception:
         logger.exception("RESEARCH error")
@@ -656,6 +867,7 @@ async def research_node(state: AgentState) -> Command:
                 "current_node": "research",
                 "current_phase": "error",
                 "messages": [AIMessage(content=error_msg)],
+                **_clear_hitl_flags(),
             },
             goto="advise",  # Still proceed to ADVISE with error context
         )

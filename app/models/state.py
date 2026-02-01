@@ -111,6 +111,23 @@ class AgentState(TypedDict, total=False):
     # Used to distinguish first entry (present results) vs subsequent (analyze intent)
     advise_has_presented: bool
 
+    # =========================================================================
+    # Human-in-the-Loop (HITL) Control
+    # =========================================================================
+    # Confirmation flags - indicate workflow is paused awaiting user action
+    awaiting_requirements_confirmation: bool
+    awaiting_fields_confirmation: bool
+    awaiting_intent_confirmation: bool
+
+    # UI action choices - buttons to display to user
+    action_choices: list[str] | None
+
+    # Pending data awaiting confirmation
+    pending_requirements_summary: str | None
+    pending_field_definitions: list[dict[str, Any]] | None
+    pending_intent: str | None
+    pending_intent_details: dict[str, Any] | None
+
 
 # =============================================================================
 # State Helpers
@@ -163,4 +180,13 @@ def create_initial_state(
         need_new_search=False,
         new_fields_to_add=[],
         current_phase="intake",
+        # HITL fields
+        awaiting_requirements_confirmation=False,
+        awaiting_fields_confirmation=False,
+        awaiting_intent_confirmation=False,
+        action_choices=None,
+        pending_requirements_summary=None,
+        pending_field_definitions=None,
+        pending_intent=None,
+        pending_intent_details=None,
     )
