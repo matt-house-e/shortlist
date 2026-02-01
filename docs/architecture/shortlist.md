@@ -83,15 +83,24 @@ INTAKE → RESEARCH → ADVISE
 app/
 ├── agents/              # LangGraph workflow nodes
 │   ├── intake.py        # INTAKE node - gather user requirements
-│   ├── research.py      # RESEARCH node - find & enrich candidates
+│   ├── research.py      # RESEARCH node - orchestrate find & enrich
+│   ├── research_explorer.py  # Web search & candidate discovery
+│   ├── research_enricher.py  # Lattice enrichment logic
+│   ├── research_table.py     # Living table utilities
 │   ├── advise.py        # ADVISE node - present recommendations
 │   ├── workflow.py      # Graph definition & orchestration
 │   └── prompts/         # YAML prompt templates
 │       ├── intake.yaml
-│       └── explorer.yaml
+│       ├── explorer.yaml
+│       ├── field_generation.yaml
+│       └── search_strategy.yaml
 │
 ├── chat/                # Chainlit handlers (UI entry point)
-│   └── handlers.py      # Message handling, rendering, auth
+│   ├── handlers.py      # Main message handling & auth
+│   ├── citations.py     # Citation formatting utilities
+│   ├── hitl_actions.py  # HITL button handling
+│   ├── starters.py      # Welcome screen prompts
+│   └── table_rendering.py  # Table display & CSV export
 │
 ├── config/              # Pydantic settings
 │   └── settings.py      # Environment configuration
@@ -99,6 +108,7 @@ app/
 ├── models/              # State schema & domain models
 │   ├── state.py         # AgentState (fat state pattern)
 │   └── schemas/
+│       ├── base.py      # BaseSchema, TimestampedSchema
 │       └── shortlist.py # Domain models (Candidate, ComparisonTable)
 │
 ├── services/            # Business logic & external integrations
@@ -106,14 +116,18 @@ app/
 │   ├── lattice.py       # Lattice enrichment service
 │   ├── search_strategy.py  # Query generation service
 │   ├── field_generation.py # Dynamic field generation
-│   └── table_rendering.py  # ProductTable props preparation
+│   ├── table_rendering.py  # ProductTable props preparation
+│   └── openai_enrichment_chain.py  # OpenAI-based enrichment
 │
 ├── auth/                # Authentication
-│   └── password_auth.py # Password-based auth
+│   ├── password_auth.py # Password-based auth
+│   └── oauth.py         # OAuth/SSO provider (placeholder)
 │
 └── utils/               # Utilities
     ├── logger.py        # Logging configuration
-    └── sanitization.py  # Input sanitization
+    ├── sanitization.py  # Input sanitization
+    ├── hitl.py          # HITL message parsing utilities
+    └── retry.py         # Retry decorators for external calls
 ```
 
 ## Data Flow
@@ -221,9 +235,9 @@ When users request new comparison fields:
 
 | Purpose | Location |
 |---------|----------|
-| Chat session start | `chat/handlers.py:486` - `on_chat_start()` |
-| Message handling | `chat/handlers.py:617` - `on_message()` |
-| HITL action handling | `chat/handlers.py:511` - `on_hitl_action()` |
+| Chat session start | `chat/handlers.py:150` - `on_chat_start()` |
+| Message handling | `chat/handlers.py:175` - `on_message()` |
+| HITL action handling | `chat/hitl_actions.py:65` - `on_hitl_action()` |
 | Workflow creation | `agents/workflow.py:101` - `create_workflow()` |
 | Message processing | `agents/workflow.py:221` - `process_message_with_state()` |
 | State schema | `models/state.py:11` - `AgentState` |
@@ -232,13 +246,19 @@ When users request new comparison fields:
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `agents/workflow.py` | 312 | Graph definition, routing, message processing |
-| `agents/intake.py` | 344 | Requirement gathering, conversational flow |
-| `agents/research.py` | 1427 | Explorer, enricher, field generation |
-| `agents/advise.py` | 492 | Recommendation presentation, intent detection |
-| `chat/handlers.py` | 723 | Chainlit UI handlers, rendering |
-| `models/state.py` | 204 | Central state schema |
-| `services/llm.py` | 417 | LLM abstraction layer |
+| `agents/workflow.py` | 311 | Graph definition, routing, message processing |
+| `agents/intake.py` | 308 | Requirement gathering, conversational flow |
+| `agents/research.py` | 420 | Research orchestrator (3 execution paths) |
+| `agents/research_explorer.py` | 621 | Web search & candidate discovery |
+| `agents/research_enricher.py` | 117 | Lattice enrichment logic |
+| `agents/research_table.py` | 106 | Living table utilities |
+| `agents/advise.py` | 440 | Recommendation presentation, intent detection |
+| `chat/handlers.py` | 292 | Main Chainlit handlers |
+| `chat/hitl_actions.py` | 174 | HITL button handling |
+| `chat/table_rendering.py` | 228 | Table display & CSV export |
+| `models/state.py` | 194 | Central state schema |
+| `models/schemas/shortlist.py` | 513 | Domain models (ComparisonTable, etc.) |
+| `services/llm.py` | 420 | LLM abstraction layer |
 
 ## Node Functions
 
@@ -290,6 +310,7 @@ make check    # Run ruff lint & format
 
 ## Related Documentation
 
+- `docs/architecture/code-reference.md` - Detailed class/function reference
 - `SPEC.md` - Full template patterns
 - `SHORTLIST_SPEC.md` - State schema & phases
 - `docs/development/github-standards.md` - PR/issue workflow
