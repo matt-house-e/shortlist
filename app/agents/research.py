@@ -3,17 +3,15 @@
 from langchain_core.messages import AIMessage
 from langgraph.types import Command
 
-from app.agents.research_enricher import enrich_living_table, enricher_step
-from app.agents.research_explorer import explorer_step, generate_field_definitions
+from app.agents.research_enricher import enrich_living_table
+from app.agents.research_explorer import explorer_step
 from app.agents.research_table import (
     add_candidates_to_table,
     add_requested_fields_to_table,
-    build_field_definitions_list,
     get_or_create_living_table,
 )
-from app.models.schemas.shortlist import CellStatus, FieldDefinition
+from app.models.schemas.shortlist import FieldDefinition
 from app.models.state import AgentState
-from app.services.llm import get_llm_service
 from app.utils.hitl import clear_hitl_flags, parse_hitl_choice
 from app.utils.logger import get_logger
 
@@ -159,9 +157,6 @@ async def research_node(state: AgentState) -> Command:
                     # Enrich all pending cells
                     living_table = await enrich_living_table(living_table)
 
-                    # Also create legacy comparison_table for backward compatibility
-                    comparison_table = await enricher_step(existing_candidates, pending_fields)
-
                     num_candidates = living_table.get_row_count()
                     qualified = len(living_table.get_qualified_rows())
                     response_msg = (
@@ -176,7 +171,6 @@ async def research_node(state: AgentState) -> Command:
                             "current_node": "research",
                             "current_phase": "advise",
                             "living_table": living_table.model_dump(),
-                            "comparison_table": comparison_table,  # Legacy support
                             "need_new_search": False,
                             "requested_fields": [],  # Clear after processing
                             "advise_has_presented": False,
@@ -242,7 +236,6 @@ async def research_node(state: AgentState) -> Command:
                     add_candidates_to_table(living_table, existing_candidates)
                     living_table = await enrich_living_table(living_table)
 
-                    comparison_table = await enricher_step(existing_candidates, pending_fields)
                     num_candidates = living_table.get_row_count()
                     response_msg = (
                         f"Research complete! I found {num_candidates} products to compare."
@@ -253,7 +246,6 @@ async def research_node(state: AgentState) -> Command:
                             "current_node": "research",
                             "current_phase": "advise",
                             "living_table": living_table.model_dump(),
-                            "comparison_table": comparison_table,
                             "need_new_search": False,
                             "requested_fields": [],
                             "advise_has_presented": False,
@@ -320,28 +312,6 @@ async def research_node(state: AgentState) -> Command:
             )
             living_table = await enrich_living_table(living_table)
 
-            # Build legacy comparison table for backward compatibility
-            field_defs_list = build_field_definitions_list(living_table)
-            comparison_table_data = state.get("comparison_table") or {}
-            existing_candidates_data = comparison_table_data.get("candidates", [])
-
-            # Merge new field data into existing comparison_table candidates
-            for candidate_data in existing_candidates_data:
-                candidate_name = candidate_data.get("name", "")
-                # Find matching row in living table
-                for row in living_table.rows.values():
-                    if row.candidate.name == candidate_name:
-                        for field_name in added_fields:
-                            cell = row.cells.get(field_name)
-                            if cell and cell.status == CellStatus.ENRICHED:
-                                candidate_data[field_name] = cell.value
-                        break
-
-            comparison_table = {
-                "fields": field_defs_list,
-                "candidates": existing_candidates_data,
-            }
-
             response_msg = (
                 f"I've added {', '.join(added_fields)} to the comparison table and enriched "
                 f"the data for all {living_table.get_row_count()} products."
@@ -354,7 +324,6 @@ async def research_node(state: AgentState) -> Command:
                     "current_node": "research",
                     "current_phase": "advise",
                     "living_table": living_table.model_dump(),
-                    "comparison_table": comparison_table,
                     "need_new_search": False,
                     "requested_fields": [],  # Clear after processing
                     "advise_has_presented": False,
@@ -397,42 +366,25 @@ async def research_node(state: AgentState) -> Command:
         # =====================================================================
         logger.info("Skipping Explorer (re-enrichment mode)")
 
-        # Get existing living table or build from legacy data
+        # Get existing living table
         living_table = get_or_create_living_table(state)
 
-        # If living table is empty, build from legacy comparison_table
+        # If living table is empty, trigger a new search instead
         if not living_table.rows:
-            comparison_table_data = state.get("comparison_table") or {}
-            field_definitions = comparison_table_data.get("fields", [])
-
-            if not field_definitions:
-                logger.warning("No existing field definitions found, regenerating")
-                requirements = state.get("user_requirements", {})
-                product_type = requirements.get("product_type", "product")
-                llm_service = get_llm_service()
-                field_definitions = await generate_field_definitions(
-                    product_type, requirements, llm_service
-                )
-
-            # Add fields to living table
-            for field_dict in field_definitions:
-                field_def = FieldDefinition(
-                    name=field_dict["name"],
-                    prompt=field_dict["prompt"],
-                    data_type=field_dict["data_type"],
-                    category=field_dict["category"],
-                )
-                living_table.add_field(field_def)
-
-            # Add candidates to living table
-            add_candidates_to_table(living_table, candidates)
+            logger.warning("No existing rows in living table, triggering new search")
+            return Command(
+                update={
+                    "messages": [AIMessage(content="Let me search for products to compare.")],
+                    "current_node": "research",
+                    "current_phase": "research",
+                    "need_new_search": True,
+                    **clear_hitl_flags(),
+                },
+                goto="research",
+            )
 
         # Enrich pending cells
         living_table = await enrich_living_table(living_table)
-
-        # Also run legacy enricher for backward compatibility
-        field_defs_list = build_field_definitions_list(living_table)
-        comparison_table = await enricher_step(candidates, field_defs_list)
 
         num_candidates = living_table.get_row_count()
         response_msg = f"Research complete! I found {num_candidates} products to compare."
@@ -445,7 +397,6 @@ async def research_node(state: AgentState) -> Command:
                 "current_phase": "advise",
                 "candidates": candidates,
                 "living_table": living_table.model_dump(),
-                "comparison_table": comparison_table,
                 "need_new_search": False,
                 "requested_fields": [],
                 "advise_has_presented": False,

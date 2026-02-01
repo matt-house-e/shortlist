@@ -104,26 +104,3 @@ def add_requested_fields_to_table(
         logger.info(f"Added user-requested field: {field_name}")
 
     return added_fields
-
-
-def build_field_definitions_list(table: ComparisonTable) -> list[dict]:
-    """
-    Convert table's FieldDefinition objects to dict list for Lattice.
-
-    Args:
-        table: ComparisonTable instance
-
-    Returns:
-        List of field definition dicts
-    """
-    return [
-        {
-            "category": str(f.category.value) if hasattr(f.category, "value") else str(f.category),
-            "name": f.name,
-            "prompt": f.prompt,
-            "data_type": str(f.data_type.value)
-            if hasattr(f.data_type, "value")
-            else str(f.data_type),
-        }
-        for f in table.fields
-    ]

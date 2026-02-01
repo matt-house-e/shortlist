@@ -1,96 +1,10 @@
-"""Enricher sub-step - Build comparison table via Lattice enrichment."""
+"""Enricher sub-step - Enrich living table via Lattice."""
 
 from app.models.schemas.shortlist import CellStatus, ComparisonTable
 from app.services.lattice import get_lattice_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-def meets_requirements(candidate: dict) -> bool:
-    """
-    Check if a candidate meets requirements based on enriched data.
-
-    Args:
-        candidate: Enriched candidate dict
-
-    Returns:
-        True if meets requirements, False otherwise
-    """
-    meets_req = candidate.get("meets_requirements")
-    # Handle various boolean representations
-    if meets_req in [True, "TRUE", "True", "true", "Yes", "yes", "1"]:
-        return True
-    return False
-
-
-async def enricher_step(
-    candidates: list[dict],
-    field_definitions: list[dict],
-) -> dict:
-    """
-    Enricher sub-step - Build comparison table via Lattice enrichment with qualification filtering.
-
-    DEPRECATED: Use enrich_living_table() for incremental enrichment.
-
-    Args:
-        candidates: List of product candidates
-        field_definitions: Field definitions for enrichment
-
-    Returns:
-        Comparison table dict with enriched data (only qualified candidates)
-    """
-    logger.info(f"Enricher: Starting enrichment for {len(candidates)} candidates")
-
-    # Get cached Lattice service
-    lattice_service = get_lattice_service()
-
-    # Prepare field definitions for Lattice
-    lattice_fields = lattice_service.prepare_field_definitions(field_definitions)
-
-    # Enrich candidates
-    results = await lattice_service.enrich_candidates(candidates, lattice_fields)
-
-    # Process results and filter by qualification
-    all_enriched = []
-    qualified_candidates = []
-    unqualified_count = 0
-    failed_count = 0
-
-    for result in results:
-        if result.success:
-            all_enriched.append(result.data)
-
-            # Check if candidate meets requirements
-            if meets_requirements(result.data):
-                qualified_candidates.append(result.data)
-            else:
-                unqualified_count += 1
-                logger.debug(
-                    f"Filtered out {result.candidate_id}: "
-                    f"{result.data.get('requirement_fit_notes', 'N/A')}"
-                )
-        else:
-            failed_count += 1
-            logger.warning(f"Enrichment failed for {result.candidate_id}: {result.error}")
-
-    logger.info(
-        f"Enricher: {len(qualified_candidates)} qualified, "
-        f"{unqualified_count} filtered out, {failed_count} failed"
-    )
-
-    # If no candidates qualified, return all with meets_requirements=FALSE for ADVISE to explain
-    if not qualified_candidates and all_enriched:
-        logger.warning("No candidates met requirements, returning all for ADVISE to explain")
-        qualified_candidates = all_enriched
-
-    # Build comparison table with qualified candidates
-    comparison_table = {
-        "fields": field_definitions,
-        "candidates": qualified_candidates,
-    }
-
-    return comparison_table
 
 
 async def enrich_living_table(table: ComparisonTable) -> ComparisonTable:

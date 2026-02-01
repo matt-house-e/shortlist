@@ -186,7 +186,6 @@ async def advise_node(state: AgentState) -> Command:
     logger.info("ADVISE node processing")
 
     messages = state.get("messages", [])
-    comparison_table = state.get("comparison_table")
     requirements = state.get("user_requirements", {})
     has_presented = state.get("advise_has_presented", False)
     awaiting_intent = state.get("awaiting_intent_confirmation", False)
@@ -275,21 +274,6 @@ async def advise_node(state: AgentState) -> Command:
             # Also include markdown table for easy reference (top 5 only)
             markdown_table = living_table.to_markdown(max_rows=5)
             table_context += f"\n\nTable Preview (top 5):\n{markdown_table}"
-
-        elif comparison_table and comparison_table.get("candidates"):
-            # Fall back to legacy comparison_table
-            candidates = comparison_table.get("candidates", [])
-            fields = comparison_table.get("fields", [])
-
-            # Include top 5 candidates with key fields
-            top_candidates = candidates[:5]
-            table_data = {
-                "total_candidates": len(candidates),
-                "fields": fields,
-                "top_5_products": top_candidates,
-            }
-
-            table_context = f"\n\nComparison Table Data:\n{json.dumps(table_data, indent=2, ensure_ascii=False)}"
 
         # Add requirements context
         requirements_context = ""
