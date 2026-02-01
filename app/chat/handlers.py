@@ -413,13 +413,43 @@ async def on_hitl_action(action: cl.Action):
 
     logger.info(f"Processing HITL synthetic message: {synthetic_message}")
 
-    # Process through workflow
-    result = await process_message_with_state(
-        workflow=workflow,
-        message=synthetic_message,
-        user_id=user_id,
-        session_id=session_id,
-    )
+    # Get product name from state for dynamic step names
+    product_name = "product"
+    config = {"configurable": {"thread_id": session_id}}
+    try:
+        current_state = await workflow.aget_state(config)
+        if current_state.values:
+            requirements = current_state.values.get("user_requirements") or {}
+            product_name = requirements.get("product_type") or "product"
+    except Exception:
+        pass  # Fall back to default
+
+    # Process through workflow with loading indicator (only for slow operations)
+    if checkpoint == "requirements":
+        step_name = f"Searching for {product_name}s..."
+        async with cl.Step(name=step_name, type="tool", show_input=False):
+            result = await process_message_with_state(
+                workflow=workflow,
+                message=synthetic_message,
+                user_id=user_id,
+                session_id=session_id,
+            )
+    elif checkpoint == "fields":
+        step_name = f"Analysing {product_name} specs..."
+        async with cl.Step(name=step_name, type="tool", show_input=False):
+            result = await process_message_with_state(
+                workflow=workflow,
+                message=synthetic_message,
+                user_id=user_id,
+                session_id=session_id,
+            )
+    else:
+        result = await process_message_with_state(
+            workflow=workflow,
+            message=synthetic_message,
+            user_id=user_id,
+            session_id=session_id,
+        )
 
     # Handle phase transition toast
     previous_phase = cl.user_session.get("previous_phase", "intake")
