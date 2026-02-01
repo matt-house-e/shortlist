@@ -69,10 +69,9 @@ class Settings(BaseSettings):
     web_search_user_region: str | None = None
 
     # -------------------------------------------------------------------------
-    # Lattice Enrichment Configuration
+    # Lattice Enrichment Configuration (uses OpenAI web search)
     # -------------------------------------------------------------------------
-    tavily_api_key: str = ""
-    lattice_model: str = "gpt-4.1-mini"
+    lattice_model: str = "o4-mini"
     lattice_temperature: float = 0.2
     lattice_max_tokens: int = 8000
     lattice_batch_size: int = 20
@@ -81,6 +80,8 @@ class Settings(BaseSettings):
     lattice_enable_checkpointing: bool = True
     lattice_checkpoint_interval: int = 100
     lattice_max_retries: int = 3
+    lattice_reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    lattice_use_reasoning: bool = True
 
     # -------------------------------------------------------------------------
     # Logging Configuration
