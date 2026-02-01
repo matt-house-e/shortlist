@@ -16,6 +16,7 @@ from app.auth.password_auth import password_auth_callback
 from app.config import get_settings
 from app.models.schemas.shortlist import ComparisonTable
 from app.services.llm import LLMService
+from app.services.table_rendering import prepare_product_table_props
 from app.utils.logger import get_logger, setup_logging
 from app.utils.sanitization import sanitize_input
 
@@ -269,6 +270,92 @@ async def send_table_with_export(
         await cl.Message(content=message_content, author=agent_name).send()
 
 
+async def send_product_table(
+    living_table_data: dict | None,
+    user_requirements: dict | None,
+    llm_service: LLMService,
+    agent_name: str,
+    include_export_button: bool = True,
+) -> bool:
+    """
+    Send the comparison table as a custom React element.
+
+    Uses the ProductTable component for a compact, interactive display with:
+    - Top 10 products (qualified first, then by enrichment completeness)
+    - 5-7 LLM-selected key fields
+    - Clickable product name links
+    - Status indicators for pending/failed cells
+
+    Args:
+        living_table_data: Serialized ComparisonTable dict
+        user_requirements: User requirements dict for context
+        llm_service: LLM service for field selection
+        agent_name: The display name of the agent
+        include_export_button: Whether to include an "Export CSV" button
+
+    Returns:
+        True if table was sent successfully, False otherwise
+    """
+    if not living_table_data:
+        return False
+
+    try:
+        # Prepare props for the React component
+        logger.info("Preparing ProductTable props...")
+        props = await prepare_product_table_props(
+            living_table_data=living_table_data,
+            user_requirements=user_requirements,
+            llm_service=llm_service,
+        )
+
+        if not props:
+            # Fall back to markdown table if props preparation fails
+            logger.warning("ProductTable props preparation failed, falling back to markdown")
+            await send_table_with_export(living_table_data, agent_name, include_export_button)
+            return True
+
+        logger.info(f"ProductTable props ready: {len(props.get('products', []))} products")
+
+        # Create custom element
+        table_element = cl.CustomElement(
+            name="ProductTable",
+            props=props,
+            display="inline",
+        )
+        logger.info(f"Created CustomElement: {table_element}")
+
+        # Build message with optional export button
+        if include_export_button:
+            export_action = cl.Action(
+                name="export_csv",
+                label="Export CSV",
+                payload={"action": "export_csv"},
+            )
+            await cl.Message(
+                content="## Comparison Table",
+                elements=[table_element],
+                actions=[export_action],
+                author=agent_name,
+            ).send()
+        else:
+            await cl.Message(
+                content="## Comparison Table",
+                elements=[table_element],
+                author=agent_name,
+            ).send()
+
+        logger.info(
+            f"Sent ProductTable: {len(props['products'])} products, {len(props['fields'])} fields"
+        )
+        return True
+
+    except Exception as e:
+        logger.exception(f"Failed to send ProductTable: {e}")
+        # Fall back to markdown table
+        await send_table_with_export(living_table_data, agent_name, include_export_button)
+        return True
+
+
 @cl.action_callback("export_csv")
 async def on_export_csv(action: cl.Action):
     """Handle CSV export button click."""
@@ -508,9 +595,20 @@ async def on_hitl_action(action: cl.Action):
 
     # Render comparison table when entering ADVISE phase with data
     if current_phase == "advise" and result.living_table:
-        await send_table_with_export(
-            result.living_table,
-            agent_name,
+        llm_service = cl.user_session.get("llm_service")
+        # Get user_requirements from workflow state
+        user_requirements = None
+        try:
+            current_state = await workflow.aget_state(config)
+            if current_state.values:
+                user_requirements = current_state.values.get("user_requirements")
+        except Exception:
+            pass
+        await send_product_table(
+            living_table_data=result.living_table,
+            user_requirements=user_requirements,
+            llm_service=llm_service,
+            agent_name=agent_name,
             include_export_button=True,
         )
 
@@ -587,9 +685,21 @@ async def on_message(message: cl.Message):
 
     # Render comparison table when entering ADVISE phase with data
     if current_phase == "advise" and result.living_table:
-        await send_table_with_export(
-            result.living_table,
-            agent_name,
+        llm_service = cl.user_session.get("llm_service")
+        # Get user_requirements from workflow state
+        user_requirements = None
+        config = {"configurable": {"thread_id": session_id}}
+        try:
+            current_state = await workflow.aget_state(config)
+            if current_state.values:
+                user_requirements = current_state.values.get("user_requirements")
+        except Exception:
+            pass
+        await send_product_table(
+            living_table_data=result.living_table,
+            user_requirements=user_requirements,
+            llm_service=llm_service,
+            agent_name=agent_name,
             include_export_button=True,
         )
 

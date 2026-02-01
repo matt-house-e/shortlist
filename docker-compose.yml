@@ -72,6 +72,7 @@ services:
     volumes:
       - ./app:/app/app:ro
       - ./public:/app/public:ro
+    command: ["chainlit", "run", "app/chat/handlers.py", "--host", "0.0.0.0", "--port", "8000", "-w"]
     depends_on:
       db:
         condition: service_healthy
