@@ -1,7 +1,401 @@
-/* Chainlit custom styles */
+/* ============================================
+   SHORTLIST - Custom Styles
+   Editorial warmth meets modern clarity
+   ============================================ */
+
+/* ==================== COLOR PALETTE REFERENCE ====================
+
+   Primary (Sage Teal): hsl(170, 43%, 42%) = #3d9a8b
+   Primary Light: hsl(168, 40%, 55%) = #5eb8a8
+   Primary Dark: hsl(168, 46%, 33%) = #2d7a6d
+
+   Accent Gold: hsl(43, 50%, 59%) = #c9a962
+   Success Green: hsl(165, 55%, 48%) = #38b89a
+
+   Dark Mode BG: hsl(30, 10%, 7%) = #151311
+   Dark Mode Card: hsl(30, 8%, 11%) = #1e1c1a
+   Dark Mode Text: hsl(38, 15%, 78%) = #d1cbc3
+
+   Light Mode BG: hsl(42, 35%, 97%) = #faf8f4
+   Light Mode Card: hsl(40, 30%, 98%) = #fbfaf7
+   Light Mode Text: hsl(30, 12%, 25%) = #47423c
+
+============================================ */
+
+/* ==================== CSS VARIABLES ==================== */
+:root {
+  /* Brand colors - Sage Teal */
+  --shortlist-primary: #3d9a8b;
+  --shortlist-primary-light: #5eb8a8;
+  --shortlist-primary-dark: #2d7a6d;
+  --shortlist-gold: #c9a962;
+  --shortlist-green: #38b89a;
+
+  /* Dark mode surfaces */
+  --shortlist-dark-bg: #151311;
+  --shortlist-dark-card: #1e1c1a;
+  --shortlist-dark-border: #2a2725;
+  --shortlist-dark-text: #d1cbc3;
+  --shortlist-dark-muted: #7a746c;
+
+  /* Light mode surfaces */
+  --shortlist-light-bg: #faf8f4;
+  --shortlist-light-card: #fbfaf7;
+  --shortlist-light-border: #e8e4dc;
+  --shortlist-light-text: #47423c;
+  --shortlist-light-muted: #8a847c;
+
+  /* Scrollbar */
+  --scrollbar-track: var(--shortlist-dark-bg);
+  --scrollbar-thumb: #3a3633;
+  --scrollbar-thumb-hover: #4a4643;
+
+  /* Input focus */
+  --input-focus-glow: 0 0 0 3px rgba(61, 154, 139, 0.15);
+}
+
+.light,
+html.light {
+  --scrollbar-track: var(--shortlist-light-bg);
+  --scrollbar-thumb: #d4d0c8;
+  --scrollbar-thumb-hover: #c4c0b8;
+}
+
+/* ==================== SCROLLBAR ==================== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* ==================== TYPOGRAPHY ==================== */
+html {
+  font-size: 17px;
+}
+
+.markdown-body,
+[class*="message"] p,
+[class*="Message"] p {
+  font-size: 1rem;
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+}
+
+.markdown-body p,
+article p {
+  margin-bottom: 1rem;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+article h1,
+article h2,
+article h3,
+article h4 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body ul,
+.markdown-body ol,
+article ul,
+article ol {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.markdown-body li,
+article li {
+  margin-bottom: 0.4rem;
+}
+
+/* ==================== HORIZONTAL RULES ==================== */
+hr,
+.markdown-body hr,
+article hr {
+  margin-top: 2.5rem !important;
+  margin-bottom: 2rem !important;
+  border: none !important;
+  border-top: 1px solid rgba(61, 154, 139, 0.2) !important;
+  height: 0 !important;
+}
+
+.light hr,
+html.light hr {
+  border-top: 1px solid rgba(45, 122, 109, 0.15) !important;
+}
+
+/* ==================== LINKS ==================== */
+.markdown-body a,
+article a {
+  color: var(--shortlist-primary) !important;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s ease;
+}
+
+.markdown-body a:hover,
+article a:hover {
+  border-bottom-color: var(--shortlist-primary);
+}
+
+.light .markdown-body a,
+html.light .markdown-body a,
+.light article a,
+html.light article a {
+  color: var(--shortlist-primary-dark) !important;
+}
+
+/* ==================== CODE BLOCKS ==================== */
+.light .hljs,
+html.light .hljs {
+  background: #f8f6f2 !important;
+  color: var(--shortlist-light-text) !important;
+}
+
+.light .hljs-keyword,
+.light .hljs-selector-tag {
+  color: var(--shortlist-primary-dark) !important;
+}
+
+.light .hljs-string,
+.light .hljs-title {
+  color: #2d7a5c !important;
+}
+
+.light .hljs-number,
+.light .hljs-literal {
+  color: #0066b8 !important;
+}
+
+.light .hljs-comment {
+  color: #8a847c !important;
+}
+
+/* ==================== LOGO OVERRIDE ==================== */
+img[alt="logo"] {
+  display: none !important;
+}
+
+/* ==================== SHORTLIST ANIMATED LOGO ==================== */
+.shortlist-logo-container {
+  position: relative;
+  width: 320px;
+  height: 100px;
+  margin: 1.5rem auto 2rem auto;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.shortlist-logo-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Logo icon - stylized checkmark/list */
+.shortlist-logo-icon {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shortlist-logo-icon svg {
+  width: 48px;
+  height: 48px;
+  color: var(--shortlist-primary);
+  transition: transform 0.3s ease;
+}
+
+.shortlist-logo-container:hover .shortlist-logo-icon svg {
+  transform: scale(1.05);
+}
+
+/* Check animation on hover */
+.shortlist-logo-icon .check-path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+.shortlist-logo-container:hover .check-path {
+  stroke-dashoffset: 0;
+}
+
+/* Logo text */
+.shortlist-logo-text {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--shortlist-dark-text);
+  transition: color 0.3s ease;
+}
+
+.light .shortlist-logo-text,
+html.light .shortlist-logo-text {
+  color: var(--shortlist-light-text);
+}
+
+/* Sparkle particles */
+.shortlist-sparkles {
+  position: absolute;
+  inset: -20px;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.shortlist-sparkle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: var(--shortlist-gold);
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0);
+}
+
+/* Sparkle animation triggered on hover */
+.shortlist-logo-container:hover .shortlist-sparkle {
+  animation: sparkle-pop 0.6s ease-out forwards;
+}
+
+.shortlist-sparkle:nth-child(1) { top: 15%; left: 10%; animation-delay: 0s; }
+.shortlist-sparkle:nth-child(2) { top: 25%; right: 15%; animation-delay: 0.1s; }
+.shortlist-sparkle:nth-child(3) { bottom: 20%; left: 20%; animation-delay: 0.15s; }
+.shortlist-sparkle:nth-child(4) { top: 10%; right: 25%; animation-delay: 0.2s; }
+.shortlist-sparkle:nth-child(5) { bottom: 30%; right: 10%; animation-delay: 0.05s; }
+.shortlist-sparkle:nth-child(6) { top: 40%; left: 5%; animation-delay: 0.25s; }
+
+@keyframes sparkle-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0) translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2) translateY(-8px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8) translateY(-16px);
+  }
+}
+
+/* Subtle floating animation for ambient sparkles */
+.shortlist-logo-container::after {
+  content: '';
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  background: var(--shortlist-gold);
+  border-radius: 50%;
+  opacity: 0;
+  top: 20%;
+  right: 5%;
+  animation: ambient-sparkle 4s ease-in-out infinite;
+}
+
+.shortlist-logo-container::before {
+  content: '';
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  background: var(--shortlist-primary-light);
+  border-radius: 50%;
+  opacity: 0;
+  bottom: 25%;
+  left: 8%;
+  animation: ambient-sparkle 5s ease-in-out 1.5s infinite;
+}
+
+@keyframes ambient-sparkle {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+}
+
+/* Tagline below logo */
+.shortlist-tagline {
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--shortlist-dark-muted);
+  white-space: nowrap;
+}
+
+.light .shortlist-tagline,
+html.light .shortlist-tagline {
+  color: var(--shortlist-light-muted);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 600px) {
+  html {
+    font-size: 16px;
+  }
+
+  .shortlist-logo-container {
+    width: 280px;
+    height: 90px;
+    margin: 1rem auto 1.5rem auto;
+  }
+
+  .shortlist-logo-icon svg {
+    width: 40px;
+    height: 40px;
+  }
+
+  .shortlist-logo-text {
+    font-size: 1.875rem;
+  }
+
+  .shortlist-tagline {
+    font-size: 0.7rem;
+  }
+}
 
 /* ==================== STEP AVATAR ==================== */
-/* Replace default Chainlit logo in tool steps with custom avatar */
 div[class*="step"] img[alt="tool"] {
   content: url("/public/avatars/tool.png") !important;
   width: 24px !important;
@@ -9,10 +403,215 @@ div[class*="step"] img[alt="tool"] {
   border-radius: 50% !important;
 }
 
-/* Fallback: target any step avatar that shows the default icon */
 div[class*="step"] > div:first-child img {
   content: url("/public/avatars/tool.png") !important;
   width: 24px !important;
   height: 24px !important;
   border-radius: 50% !important;
+}
+
+/* ==================== INPUT FIELD ==================== */
+#message-composer {
+  background: transparent !important;
+  border: 2px solid var(--shortlist-dark-border) !important;
+  box-shadow: none !important;
+  border-radius: 0.625rem !important;
+  transition: all 0.25s ease;
+}
+
+#message-composer:focus-within {
+  box-shadow: var(--input-focus-glow) !important;
+  border-color: var(--shortlist-primary) !important;
+}
+
+.light #message-composer,
+html.light #message-composer {
+  border-color: var(--shortlist-light-border) !important;
+}
+
+.light #message-composer:focus-within,
+html.light #message-composer:focus-within {
+  box-shadow: var(--input-focus-glow) !important;
+  border-color: var(--shortlist-primary-dark) !important;
+}
+
+/* ==================== ACTION BUTTONS ==================== */
+button.px-3.text-muted-foreground {
+  color: var(--shortlist-primary) !important;
+  transition: color 0.2s ease;
+}
+
+button.px-3.text-muted-foreground:hover {
+  color: var(--shortlist-primary-light) !important;
+}
+
+.light button.px-3.text-muted-foreground,
+html.light button.px-3.text-muted-foreground {
+  color: var(--shortlist-primary-dark) !important;
+}
+
+.light button.px-3.text-muted-foreground:hover,
+html.light button.px-3.text-muted-foreground:hover {
+  color: var(--shortlist-primary) !important;
+}
+
+/* ==================== STARTER BUTTONS ==================== */
+.welcome-screen button {
+  white-space: pre-wrap;
+  transition: all 0.2s ease;
+}
+
+.welcome-screen button:hover {
+  border-color: var(--shortlist-primary) !important;
+}
+
+/* ==================== TABLES (for comparison display) ==================== */
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+}
+
+.markdown-body th {
+  background: var(--shortlist-dark-card);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 2px solid var(--shortlist-primary);
+}
+
+.markdown-body td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--shortlist-dark-border);
+}
+
+.markdown-body tr:hover td {
+  background: rgba(61, 154, 139, 0.05);
+}
+
+.light .markdown-body th,
+html.light .markdown-body th {
+  background: var(--shortlist-light-card);
+  border-bottom-color: var(--shortlist-primary-dark);
+}
+
+.light .markdown-body td,
+html.light .markdown-body td {
+  border-bottom-color: var(--shortlist-light-border);
+}
+
+.light .markdown-body tr:hover td,
+html.light .markdown-body tr:hover td {
+  background: rgba(45, 122, 109, 0.04);
+}
+
+/* ==================== BLOCKQUOTES ==================== */
+.markdown-body blockquote {
+  border-left: 3px solid var(--shortlist-primary);
+  margin: 1.5rem 0;
+  padding: 0.75rem 1.25rem;
+  background: rgba(61, 154, 139, 0.05);
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.light .markdown-body blockquote,
+html.light .markdown-body blockquote {
+  border-left-color: var(--shortlist-primary-dark);
+  background: rgba(45, 122, 109, 0.04);
+}
+
+/* ==================== PRODUCT TABLE (React Component) ==================== */
+.product-table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Row hover effect */
+.product-table-row:hover td {
+  background-color: rgba(61, 154, 139, 0.08) !important;
+}
+
+.light .product-table-row:hover td,
+html.light .product-table-row:hover td {
+  background-color: rgba(45, 122, 109, 0.06) !important;
+}
+
+/* Ensure sticky column maintains hover background */
+.product-table-row:hover td:first-child {
+  background-color: var(--shortlist-dark-bg) !important;
+}
+
+.light .product-table-row:hover td:first-child,
+html.light .product-table-row:hover td:first-child {
+  background-color: var(--shortlist-light-bg) !important;
+}
+
+/* Light mode overrides for table container */
+.light .product-table-container,
+html.light .product-table-container {
+  border-color: var(--shortlist-light-border);
+}
+
+.light .product-table-container table th,
+html.light .product-table-container table th {
+  background-color: var(--shortlist-light-card) !important;
+  color: var(--shortlist-light-text) !important;
+  border-bottom-color: var(--shortlist-primary-dark) !important;
+}
+
+.light .product-table-container table td,
+html.light .product-table-container table td {
+  border-bottom-color: var(--shortlist-light-border) !important;
+  color: var(--shortlist-light-text) !important;
+}
+
+.light .product-table-container table td:first-child,
+html.light .product-table-container table td:first-child {
+  background-color: var(--shortlist-light-bg) !important;
+}
+
+/* Product link in light mode */
+.light .product-table-container a,
+html.light .product-table-container a {
+  color: var(--shortlist-primary-dark) !important;
+}
+
+/* Footer in light mode */
+.light .product-table-container > div:last-child,
+html.light .product-table-container > div:last-child {
+  background-color: var(--shortlist-light-card) !important;
+  border-top-color: var(--shortlist-light-border) !important;
+  color: var(--shortlist-light-muted) !important;
+}
+
+/* ==================== WELCOME SCREEN ENHANCEMENTS ==================== */
+.welcome-screen {
+  padding-top: 2rem;
+}
+
+/* Subtle gradient overlay */
+.welcome-screen::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 300px;
+  background: radial-gradient(
+    ellipse 80% 50% at 50% -10%,
+    rgba(61, 154, 139, 0.08) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.light .welcome-screen::before,
+html.light .welcome-screen::before {
+  background: radial-gradient(
+    ellipse 80% 50% at 50% -10%,
+    rgba(45, 122, 109, 0.06) 0%,
+    transparent 70%
+  );
 }
