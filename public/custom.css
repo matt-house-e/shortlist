@@ -523,8 +523,7 @@ html.light .markdown-body blockquote {
 
 /* ==================== PRODUCT TABLE (React Component) ==================== */
 .product-table-container {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
 }
 
 /* Row hover effect */
@@ -590,16 +589,16 @@ html.light .product-table-container > div:last-child {
   padding-top: 2rem;
 }
 
-/* Subtle gradient overlay */
+/* Subtle gradient overlay at bottom */
 .welcome-screen::before {
   content: '';
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
   right: 0;
   height: 300px;
   background: radial-gradient(
-    ellipse 80% 50% at 50% -10%,
+    ellipse 80% 50% at 50% 110%,
     rgba(61, 154, 139, 0.08) 0%,
     transparent 70%
   );
@@ -610,7 +609,7 @@ html.light .product-table-container > div:last-child {
 .light .welcome-screen::before,
 html.light .welcome-screen::before {
   background: radial-gradient(
-    ellipse 80% 50% at 50% -10%,
+    ellipse 80% 50% at 50% 110%,
     rgba(45, 122, 109, 0.06) 0%,
     transparent 70%
   );
