@@ -67,6 +67,20 @@ class Settings(BaseSettings):
     web_search_user_region: str | None = None
 
     # -------------------------------------------------------------------------
+    # Lattice Enrichment Configuration
+    # -------------------------------------------------------------------------
+    tavily_api_key: str = ""
+    lattice_model: str = "gpt-4.1-mini"
+    lattice_temperature: float = 0.2
+    lattice_max_tokens: int = 8000
+    lattice_batch_size: int = 20
+    lattice_max_workers: int = 30
+    lattice_row_delay: float = 0.1
+    lattice_enable_checkpointing: bool = True
+    lattice_checkpoint_interval: int = 100
+    lattice_max_retries: int = 3
+
+    # -------------------------------------------------------------------------
     # Logging Configuration
     # -------------------------------------------------------------------------
     log_level: str = "INFO"

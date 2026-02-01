@@ -296,27 +296,35 @@ class LLMService:
             citations: list[Citation] = []
             sources: list[str] = []
 
-            for item in response.output:
-                if item.type == "message":
-                    for content_item in item.content:
-                        if content_item.type == "output_text":
-                            content = content_item.text
-                            # Extract citations from annotations
-                            if hasattr(content_item, "annotations"):
-                                for ann in content_item.annotations:
-                                    if ann.type == "url_citation":
-                                        citations.append(
-                                            Citation(
-                                                url=ann.url,
-                                                title=ann.title,
-                                                start_index=ann.start_index,
-                                                end_index=ann.end_index,
-                                            )
-                                        )
-                elif item.type == "web_search_call":
-                    # Extract sources from web search action if available
-                    if hasattr(item, "action") and hasattr(item.action, "sources"):
-                        sources.extend(item.action.sources)
+            # Handle None or empty output
+            if response.output:
+                for item in response.output:
+                    if item.type == "message":
+                        # Handle None content
+                        if item.content:
+                            for content_item in item.content:
+                                if content_item.type == "output_text":
+                                    content = content_item.text or ""
+                                    # Extract citations from annotations
+                                    if (
+                                        hasattr(content_item, "annotations")
+                                        and content_item.annotations
+                                    ):
+                                        for ann in content_item.annotations:
+                                            if ann.type == "url_citation":
+                                                citations.append(
+                                                    Citation(
+                                                        url=ann.url,
+                                                        title=ann.title or "",
+                                                        start_index=ann.start_index,
+                                                        end_index=ann.end_index,
+                                                    )
+                                                )
+                    elif item.type == "web_search_call":
+                        # Extract sources from web search action if available
+                        if hasattr(item, "action") and hasattr(item.action, "sources"):
+                            if item.action.sources:
+                                sources.extend(item.action.sources)
 
             # Extract token usage
             prompt_tokens = 0

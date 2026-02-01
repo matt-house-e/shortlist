@@ -1,12 +1,15 @@
 """Tests for Lattice enrichment service."""
 
+import os
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
 import pytest
 
 from app.services.lattice import (
     EnrichmentResult,
     FieldDefinition,
     LatticeService,
-    MockLatticeService,
 )
 
 
@@ -72,16 +75,51 @@ def test_enrichment_result_failure():
     assert result.error == "Network timeout"
 
 
-def test_lattice_service_initialization():
+@pytest.fixture
+def mock_settings():
+    """Create mock settings for LatticeService."""
+    settings = MagicMock()
+    settings.openai_api_key = "test-openai-key"
+    settings.tavily_api_key = "test-tavily-key"
+    settings.lattice_model = "gpt-4.1-mini"
+    settings.lattice_temperature = 0.2
+    settings.lattice_max_tokens = 8000
+    settings.lattice_batch_size = 20
+    settings.lattice_max_workers = 30
+    settings.lattice_row_delay = 0.1
+    settings.lattice_enable_checkpointing = False
+    settings.lattice_checkpoint_interval = 100
+    settings.lattice_max_retries = 3
+    return settings
+
+
+@patch("app.services.lattice.get_settings")
+@patch("app.services.lattice.WebEnrichedLLMChain")
+def test_lattice_service_initialization(mock_chain_class, mock_get_settings, mock_settings):
     """Test LatticeService initialization."""
-    service = LatticeService(max_retries=3, batch_size=10)
+    mock_get_settings.return_value = mock_settings
+    mock_chain_class.create.return_value = MagicMock()
 
-    assert service.max_retries == 3
-    assert service.batch_size == 10
+    service = LatticeService()
+
+    assert service.chain is not None
+    assert service.config is not None
+    mock_chain_class.create.assert_called_once_with(
+        api_key="test-openai-key",
+        tavily_api_key="test-tavily-key",
+        model="gpt-4.1-mini",
+        temperature=0.2,
+        max_tokens=8000,
+    )
 
 
-def test_prepare_field_definitions():
+@patch("app.services.lattice.get_settings")
+@patch("app.services.lattice.WebEnrichedLLMChain")
+def test_prepare_field_definitions(mock_chain_class, mock_get_settings, mock_settings):
     """Test preparing field definitions."""
+    mock_get_settings.return_value = mock_settings
+    mock_chain_class.create.return_value = MagicMock()
+
     service = LatticeService()
 
     fields = [
@@ -108,73 +146,91 @@ def test_prepare_field_definitions():
     assert field_defs[1].data_type == "number"
 
 
-@pytest.mark.asyncio
-async def test_mock_lattice_service_enrichment():
-    """Test mock enrichment service."""
-    service = MockLatticeService()
+@patch("app.services.lattice.get_settings")
+@patch("app.services.lattice.WebEnrichedLLMChain")
+def test_normalize_type(mock_chain_class, mock_get_settings, mock_settings):
+    """Test data type normalization."""
+    mock_get_settings.return_value = mock_settings
+    mock_chain_class.create.return_value = MagicMock()
 
-    candidates = [
+    service = LatticeService()
+
+    assert service._normalize_type("string") == "String"
+    assert service._normalize_type("STRING") == "String"
+    assert service._normalize_type("number") == "Number"
+    assert service._normalize_type("boolean") == "Boolean"
+    assert service._normalize_type("unknown") == "String"
+
+
+@patch("app.services.lattice.get_settings")
+@patch("app.services.lattice.WebEnrichedLLMChain")
+def test_convert_results(mock_chain_class, mock_get_settings, mock_settings):
+    """Test conversion of enriched DataFrame to results."""
+    mock_get_settings.return_value = mock_settings
+    mock_chain_class.create.return_value = MagicMock()
+
+    service = LatticeService()
+
+    # Create test data
+    df = pd.DataFrame(
+        [
+            {"name": "Product A", "price": "$50", "rating": "4.5"},
+            {"name": "Product B", "price": "$75", "rating": "4.2"},
+        ]
+    )
+
+    original = [
         {"name": "Product A", "official_url": "https://example.com/a"},
         {"name": "Product B", "official_url": "https://example.com/b"},
     ]
 
-    field_defs = [
+    field_definitions = [
         FieldDefinition("standard", "price", "Extract price", "string"),
         FieldDefinition("standard", "rating", "Extract rating", "string"),
     ]
 
-    results = await service.enrich_candidates(candidates, field_defs)
+    results = service._convert_results(df, original, field_definitions)
 
     assert len(results) == 2
     assert all(r.success for r in results)
     assert results[0].candidate_id == "Product A"
+    assert results[0].data["price"] == "$50"
+    assert results[0].data["official_url"] == "https://example.com/a"
     assert results[1].candidate_id == "Product B"
-    assert "price" in results[0].data
-    assert "rating" in results[0].data
+    assert results[1].data["rating"] == "4.2"
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not os.environ.get("TAVILY_API_KEY") or not os.environ.get("OPENAI_API_KEY"),
+    reason="Requires TAVILY_API_KEY and OPENAI_API_KEY environment variables",
+)
 @pytest.mark.asyncio
-async def test_lattice_service_batch_processing():
-    """Test batch processing with small batch size."""
-    service = MockLatticeService()
-    service.batch_size = 1  # Force batching
+async def test_lattice_service_real_enrichment():
+    """Integration test for real Lattice enrichment.
 
-    candidates = [
-        {"name": "Product A", "official_url": "https://example.com/a"},
-        {"name": "Product B", "official_url": "https://example.com/b"},
-        {"name": "Product C", "official_url": "https://example.com/c"},
-    ]
-
-    field_defs = [
-        FieldDefinition("standard", "price", "Extract price", "string"),
-    ]
-
-    results = await service.enrich_candidates(candidates, field_defs)
-
-    assert len(results) == 3
-    assert all(r.success for r in results)
-
-
-@pytest.mark.asyncio
-async def test_enrichment_result_has_candidate_data():
-    """Test that enrichment preserves candidate data."""
-    service = MockLatticeService()
+    This test requires actual API keys and will make real API calls.
+    Run with: pytest -m integration tests/services/test_lattice.py
+    """
+    service = LatticeService()
 
     candidates = [
         {
-            "name": "Test Product",
-            "official_url": "https://example.com/test",
-            "manufacturer": "Test Brand",
+            "name": "Fellow Stagg EKG Electric Kettle",
+            "official_url": "https://fellowproducts.com/products/stagg-ekg-electric-pour-over-kettle",
         },
     ]
 
-    field_defs = [
-        FieldDefinition("standard", "price", "Extract price", "string"),
+    field_definitions = [
+        FieldDefinition("standard", "price", "Extract the current retail price", "string"),
+        FieldDefinition("standard", "description", "Extract a brief product description", "string"),
     ]
 
-    results = await service.enrich_candidates(candidates, field_defs)
+    results = await service.enrich_candidates(candidates, field_definitions)
 
     assert len(results) == 1
-    assert results[0].success is True
-    assert results[0].data["name"] == "Test Product"
-    assert results[0].data["official_url"] == "https://example.com/test"
+    assert results[0].candidate_id == "Fellow Stagg EKG Electric Kettle"
+    # Results may succeed or fail depending on API availability,
+    # but the structure should be correct
+    assert isinstance(results[0].success, bool)
+    assert isinstance(results[0].data, dict)

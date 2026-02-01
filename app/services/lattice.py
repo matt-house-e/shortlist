@@ -1,8 +1,15 @@
 """Lattice enrichment service - Bulk data enrichment for product candidates."""
 
-import asyncio
+import csv
+import tempfile
+from pathlib import Path
 from typing import Any
 
+import pandas as pd
+from lattice import EnrichmentConfig, FieldManager, TableEnricher
+from lattice.chains import WebEnrichedLLMChain
+
+from app.config.settings import get_settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,23 +78,41 @@ class LatticeService:
     """
     Service for bulk enrichment of product candidates using Lattice.
 
-    Lattice extracts structured data from URLs using web-enriched chains.
-    This service handles batch processing, retries, and error handling.
+    Uses WebEnrichedLLMChain with Tavily for real-time web data.
     """
 
-    def __init__(self, max_retries: int = 2, batch_size: int = 20):
-        """
-        Initialize Lattice service.
+    CATEGORY_NAME = "shortlist_enrichment"
 
-        Args:
-            max_retries: Maximum number of retries for failed enrichments
-            batch_size: Maximum candidates per batch (for rate limiting)
-        """
-        self.max_retries = max_retries
-        self.batch_size = batch_size
-        logger.info(
-            f"LatticeService initialized (max_retries={max_retries}, batch_size={batch_size})"
+    def __init__(self):
+        """Initialize LatticeService with WebEnrichedLLMChain."""
+        settings = get_settings()
+
+        # Create WebEnrichedLLMChain (with Tavily web search)
+        self.chain = WebEnrichedLLMChain.create(
+            api_key=settings.openai_api_key,
+            tavily_api_key=settings.tavily_api_key,
+            model=settings.lattice_model,
+            temperature=settings.lattice_temperature,
+            max_tokens=settings.lattice_max_tokens,
         )
+
+        # Create enrichment config
+        self.config = EnrichmentConfig(
+            batch_size=settings.lattice_batch_size,
+            max_workers=settings.lattice_max_workers,
+            row_delay=settings.lattice_row_delay,
+            enable_async=True,
+            enable_checkpointing=settings.lattice_enable_checkpointing,
+            checkpoint_interval=settings.lattice_checkpoint_interval,
+            enable_retries=True,
+            max_retries=settings.lattice_max_retries,
+            retry_delay=2.0,
+            enable_progress_bar=False,  # Disabled for server context
+        )
+
+        self._temp_csv_path: Path | None = None
+
+        logger.info("LatticeService initialized with WebEnrichedLLMChain")
 
     def prepare_field_definitions(
         self,
@@ -122,9 +147,7 @@ class LatticeService:
         field_definitions: list[FieldDefinition],
     ) -> list[EnrichmentResult]:
         """
-        Enrich candidates with structured data extraction.
-
-        Processes candidates in batches, with retry logic and graceful error handling.
+        Enrich candidates using real Lattice library.
 
         Args:
             candidates: List of product candidates with name, official_url, etc.
@@ -135,180 +158,138 @@ class LatticeService:
         """
         logger.info(f"Starting enrichment for {len(candidates)} candidates")
 
-        # Split into batches if needed
-        batches = [
-            candidates[i : i + self.batch_size] for i in range(0, len(candidates), self.batch_size)
-        ]
+        try:
+            # Create FieldManager from dynamic field definitions
+            field_manager = self._create_field_manager(field_definitions)
 
-        results = []
-        for batch_idx, batch in enumerate(batches):
-            logger.info(
-                f"Processing batch {batch_idx + 1}/{len(batches)} ({len(batch)} candidates)"
+            # Convert candidates to DataFrame
+            df = pd.DataFrame(candidates)
+            if "name" not in df.columns:
+                df["name"] = [f"candidate_{i}" for i in range(len(df))]
+
+            # Create enricher
+            enricher = TableEnricher(
+                chain=self.chain,
+                field_manager=field_manager,
+                config=self.config,
             )
 
-            batch_results = await self._enrich_batch(batch, field_definitions)
-            results.extend(batch_results)
+            # Enrich using async method
+            enriched_df = await enricher.enrich_dataframe_async(
+                df,
+                category=self.CATEGORY_NAME,
+                overwrite_fields=False,
+                data_identifier="shortlist_enrichment",
+            )
 
-        # Log summary
-        successful = sum(1 for r in results if r.success)
-        failed = len(results) - successful
-        logger.info(f"Enrichment complete: {successful} successful, {failed} failed")
+            # Convert results
+            results = self._convert_results(enriched_df, candidates, field_definitions)
 
-        return results
+            successful = sum(1 for r in results if r.success)
+            logger.info(f"Enrichment complete: {successful}/{len(results)} successful")
 
-    async def _enrich_batch(
+            return results
+
+        except Exception as e:
+            logger.exception(f"Enrichment failed: {e}")
+            # Return error results for all candidates
+            return [
+                EnrichmentResult(
+                    candidate_id=c.get("name", f"candidate_{i}"),
+                    success=False,
+                    error=str(e),
+                )
+                for i, c in enumerate(candidates)
+            ]
+
+        finally:
+            self._cleanup()
+
+    def _create_field_manager(self, field_definitions: list[FieldDefinition]) -> FieldManager:
+        """
+        Create FieldManager from dynamic field definitions via temp CSV.
+
+        Args:
+            field_definitions: List of FieldDefinition objects
+
+        Returns:
+            Configured FieldManager instance
+        """
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["Category", "Field", "Prompt", "Instructions", "Data_Type"],
+            )
+            writer.writeheader()
+
+            for fd in field_definitions:
+                writer.writerow(
+                    {
+                        "Category": self.CATEGORY_NAME,
+                        "Field": fd.field,
+                        "Prompt": fd.prompt,
+                        "Instructions": "",
+                        "Data_Type": self._normalize_type(fd.data_type),
+                    }
+                )
+
+            self._temp_csv_path = Path(f.name)
+
+        return FieldManager.from_csv(str(self._temp_csv_path))
+
+    def _normalize_type(self, data_type: str) -> str:
+        """
+        Normalize data type to Lattice format.
+
+        Args:
+            data_type: Input data type string
+
+        Returns:
+            Normalized type string for Lattice
+        """
+        return {"string": "String", "number": "Number", "boolean": "Boolean"}.get(
+            data_type.lower(), "String"
+        )
+
+    def _convert_results(
         self,
-        candidates: list[dict[str, Any]],
+        df: pd.DataFrame,
+        original: list[dict[str, Any]],
         field_definitions: list[FieldDefinition],
     ) -> list[EnrichmentResult]:
         """
-        Enrich a single batch of candidates.
+        Convert enriched DataFrame to list of EnrichmentResult.
 
         Args:
-            candidates: Batch of candidates to enrich
-            field_definitions: Field definitions for enrichment
+            df: Enriched DataFrame from Lattice
+            original: Original candidate list
+            field_definitions: Field definitions used for enrichment
 
         Returns:
-            List of EnrichmentResult objects for this batch
+            List of EnrichmentResult objects
         """
+        field_names = [fd.field for fd in field_definitions]
         results = []
 
-        for candidate in candidates:
-            result = await self._enrich_single_candidate(candidate, field_definitions)
-            results.append(result)
+        for idx, row in df.iterrows():
+            candidate_data = original[idx].copy() if idx < len(original) else {}
+
+            for field in field_names:
+                if field in row and pd.notna(row[field]):
+                    candidate_data[field] = row[field]
+
+            results.append(
+                EnrichmentResult(
+                    candidate_id=candidate_data.get("name", f"candidate_{idx}"),
+                    success=True,
+                    data=candidate_data,
+                )
+            )
 
         return results
 
-    async def _enrich_single_candidate(
-        self,
-        candidate: dict[str, Any],
-        field_definitions: list[FieldDefinition],
-        retry_count: int = 0,
-    ) -> EnrichmentResult:
-        """
-        Enrich a single candidate with retry logic.
-
-        Args:
-            candidate: Candidate to enrich
-            field_definitions: Field definitions for enrichment
-            retry_count: Current retry attempt
-
-        Returns:
-            EnrichmentResult for this candidate
-        """
-        candidate_id = candidate.get("name", "unknown")
-
-        try:
-            # TODO: Actual Lattice integration would go here
-            # For now, this is a placeholder that would be replaced with:
-            # enriched_data = await lattice_client.enrich(
-            #     url=candidate["official_url"],
-            #     fields=field_definitions,
-            # )
-
-            logger.info(f"Enriching candidate: {candidate_id}")
-
-            # Placeholder: simulate enrichment
-            enriched_data = await self._mock_enrich(candidate, field_definitions)
-
-            return EnrichmentResult(
-                candidate_id=candidate_id,
-                success=True,
-                data=enriched_data,
-            )
-
-        except Exception as e:
-            logger.error(f"Enrichment failed for {candidate_id}: {e}")
-
-            # Retry logic
-            if retry_count < self.max_retries:
-                logger.info(
-                    f"Retrying {candidate_id} (attempt {retry_count + 1}/{self.max_retries})"
-                )
-                # Exponential backoff
-                await asyncio.sleep(2**retry_count)
-                return await self._enrich_single_candidate(
-                    candidate,
-                    field_definitions,
-                    retry_count + 1,
-                )
-
-            # Max retries exceeded
-            return EnrichmentResult(
-                candidate_id=candidate_id,
-                success=False,
-                error=str(e),
-            )
-
-    async def _mock_enrich(
-        self,
-        candidate: dict[str, Any],
-        field_definitions: list[FieldDefinition],
-    ) -> dict[str, Any]:
-        """
-        Mock enrichment for testing.
-
-        This simulates the Lattice API response structure.
-
-        Args:
-            candidate: Candidate to enrich
-            field_definitions: Field definitions
-
-        Returns:
-            Enriched data dictionary
-        """
-        # Simulate API delay
-        await asyncio.sleep(0.1)
-
-        enriched_data = {
-            "name": candidate.get("name"),
-            "official_url": candidate.get("official_url"),
-        }
-
-        # Mock field values based on field definitions
-        for field_def in field_definitions:
-            if field_def.data_type == "number":
-                enriched_data[field_def.field] = 4.5
-            elif field_def.data_type == "boolean":
-                enriched_data[field_def.field] = True
-            else:
-                enriched_data[field_def.field] = f"Mock {field_def.field}"
-
-        return enriched_data
-
-
-class MockLatticeService(LatticeService):
-    """
-    Mock Lattice service for testing.
-
-    Always succeeds with predictable mock data.
-    """
-
-    def __init__(self):
-        """Initialize mock service."""
-        super().__init__(max_retries=0, batch_size=20)
-        logger.info("MockLatticeService initialized")
-
-    async def _mock_enrich(
-        self,
-        candidate: dict[str, Any],
-        field_definitions: list[FieldDefinition],
-    ) -> dict[str, Any]:
-        """
-        Mock enrichment with predictable test data.
-
-        Args:
-            candidate: Candidate to enrich
-            field_definitions: Field definitions
-
-        Returns:
-            Enriched data dictionary
-        """
-        # No delay for tests
-        return {
-            "name": candidate.get("name"),
-            "official_url": candidate.get("official_url"),
-            "price": "$50",
-            "rating": "4.5",
-            "category": "test-category",
-        }
+    def _cleanup(self):
+        """Clean up temp files."""
+        if self._temp_csv_path and self._temp_csv_path.exists():
+            self._temp_csv_path.unlink()
+            self._temp_csv_path = None
