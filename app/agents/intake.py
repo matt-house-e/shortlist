@@ -65,6 +65,86 @@ class IntakeDecision(BaseModel):
     )
 
 
+def format_requirements_summary(requirements: dict) -> str:
+    """
+    Format requirements into a human-readable summary for HITL confirmation.
+
+    Args:
+        requirements: User requirements dict
+
+    Returns:
+        Formatted summary string
+    """
+    parts = []
+
+    product_type = requirements.get("product_type")
+    if product_type:
+        parts.append(f"**Product:** {product_type}")
+
+    budget_min = requirements.get("budget_min")
+    budget_max = requirements.get("budget_max")
+    if budget_min and budget_max:
+        parts.append(f"**Budget:** ${budget_min} - ${budget_max}")
+    elif budget_max:
+        parts.append(f"**Budget:** Under ${budget_max}")
+    elif budget_min:
+        parts.append(f"**Budget:** Over ${budget_min}")
+
+    must_haves = requirements.get("must_haves", [])
+    if must_haves:
+        parts.append(f"**Must have:** {', '.join(must_haves)}")
+
+    nice_to_haves = requirements.get("nice_to_haves", [])
+    if nice_to_haves:
+        parts.append(f"**Nice to have:** {', '.join(nice_to_haves)}")
+
+    priorities = requirements.get("priorities", [])
+    if priorities:
+        parts.append(f"**Priorities:** {', '.join(priorities)}")
+
+    constraints = requirements.get("constraints", [])
+    if constraints:
+        parts.append(f"**Avoid:** {', '.join(constraints)}")
+
+    return "\n".join(parts) if parts else "No specific requirements captured."
+
+
+def parse_hitl_choice(content: str) -> str | None:
+    """
+    Parse the choice from a HITL message.
+
+    Args:
+        content: Message content like "[HITL:requirements:Search Now]"
+
+    Returns:
+        The choice string or None if invalid
+    """
+    if not content.startswith("[HITL:"):
+        return None
+    try:
+        inner = content[6:-1]  # Remove [HITL: and ]
+        parts = inner.split(":", 1)
+        if len(parts) == 2:
+            return parts[1]
+    except Exception:
+        pass
+    return None
+
+
+def _clear_hitl_flags() -> dict:
+    """Return a dict of cleared HITL flags for state updates."""
+    return {
+        "awaiting_requirements_confirmation": False,
+        "awaiting_fields_confirmation": False,
+        "awaiting_intent_confirmation": False,
+        "action_choices": None,
+        "pending_requirements_summary": None,
+        "pending_field_definitions": None,
+        "pending_intent": None,
+        "pending_intent_details": None,
+    }
+
+
 async def intake_node(state: AgentState) -> Command:
     """
     INTAKE node - Gather user requirements through multi-turn conversation.
@@ -72,6 +152,10 @@ async def intake_node(state: AgentState) -> Command:
     This node engages in dialogue to understand what the user wants to buy.
     It uses LLM structured output to extract requirements and LLM judgment
     to determine when enough information has been gathered to proceed to RESEARCH.
+
+    HITL Flow:
+    - When requirements are sufficient, shows "Search Now" / "Edit Requirements" buttons
+    - User must confirm before proceeding to expensive RESEARCH phase
 
     Args:
         state: Current workflow state
@@ -83,6 +167,44 @@ async def intake_node(state: AgentState) -> Command:
 
     messages = state.get("messages", [])
     current_requirements = state.get("user_requirements") or {}
+
+    # Check for HITL action at start
+    if messages:
+        last_message = messages[-1]
+        if hasattr(last_message, "content") and last_message.content.startswith(
+            "[HITL:requirements:"
+        ):
+            choice = parse_hitl_choice(last_message.content)
+            logger.info(f"INTAKE: HITL action received - {choice}")
+
+            if choice == "Search Now":
+                # User confirmed, proceed to research
+                logger.info("INTAKE: User confirmed, transitioning to RESEARCH")
+                return Command(
+                    update={
+                        "messages": [AIMessage(content="Starting the search now...")],
+                        "current_node": "intake",
+                        "current_phase": "research",
+                        **_clear_hitl_flags(),
+                    },
+                    goto="research",
+                )
+            else:
+                # User wants to edit requirements
+                logger.info("INTAKE: User wants to edit requirements")
+                return Command(
+                    update={
+                        "messages": [
+                            AIMessage(
+                                content="No problem! What would you like to change or add to your requirements?"
+                            )
+                        ],
+                        "current_node": "intake",
+                        "current_phase": "intake",
+                        **_clear_hitl_flags(),
+                    },
+                    goto="__end__",
+                )
 
     try:
         llm_service = get_llm_service()
@@ -143,25 +265,24 @@ Consider the conversation flow - if the user seems ready to see results or has a
 
         # Step 3: Generate conversational response
         if decision.requirements_sufficient:
-            # Ready to search - confirm and transition
-            confirmation_prompt = """The user has provided enough information. Generate a friendly confirmation message that:
-1. Briefly summarizes what they're looking for
-2. Confirms you'll search for products
-3. Is conversational and encouraging (not robotic)
+            # Ready to search - pause for HITL confirmation
+            summary = format_requirements_summary(updated_requirements)
+            confirmation_message = f"Here's what I found from our conversation:\n\n{summary}\n\nReady to search for products?"
 
-Keep it to 2-3 sentences."""
+            logger.info("INTAKE: Requirements sufficient, awaiting HITL confirmation")
 
-            confirmation_messages = messages.copy()
-            confirmation_messages.append(HumanMessage(content=confirmation_prompt))
-
-            llm_response = await llm_service.generate(
-                confirmation_messages,
-                system_prompt=INTAKE_SYSTEM_PROMPT,
+            return Command(
+                update={
+                    "messages": [AIMessage(content=confirmation_message)],
+                    "current_node": "intake",
+                    "current_phase": "intake",  # Stay in intake until confirmed
+                    "user_requirements": updated_requirements,
+                    "awaiting_requirements_confirmation": True,
+                    "pending_requirements_summary": summary,
+                    "action_choices": ["Search Now", "Edit Requirements"],
+                },
+                goto="__end__",  # Return control to user for HITL
             )
-
-            next_phase = "research"
-            goto = "research"
-            logger.info("Transitioning to RESEARCH")
         else:
             # Need more information - ask the next question
             if decision.next_question:
@@ -184,20 +305,17 @@ Ask about ONE specific thing that would help narrow down the search. Be conversa
                 )
                 response_content = llm_response.content
 
-            llm_response = type("Response", (), {"content": response_content})()
-            next_phase = "intake"
-            goto = "__end__"  # Return control to user for next input
             logger.info("Staying in INTAKE")
 
-        return Command(
-            update={
-                "messages": [AIMessage(content=llm_response.content)],
-                "current_node": "intake",
-                "current_phase": next_phase,
-                "user_requirements": updated_requirements,
-            },
-            goto=goto,
-        )
+            return Command(
+                update={
+                    "messages": [AIMessage(content=response_content)],
+                    "current_node": "intake",
+                    "current_phase": "intake",
+                    "user_requirements": updated_requirements,
+                },
+                goto="__end__",  # Return control to user for next input
+            )
 
     except Exception:
         logger.exception("INTAKE error")

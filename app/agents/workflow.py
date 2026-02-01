@@ -14,6 +14,29 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def parse_hitl_message(content: str) -> tuple[str, str] | None:
+    """
+    Parse a HITL synthetic message.
+
+    Args:
+        content: Message content to parse
+
+    Returns:
+        Tuple of (checkpoint, choice) if valid HITL message, None otherwise
+    """
+    if not content.startswith("[HITL:"):
+        return None
+    # Format: [HITL:checkpoint:choice]
+    try:
+        inner = content[6:-1]  # Remove [HITL: and ]
+        parts = inner.split(":", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+    except Exception:
+        pass
+    return None
+
+
 async def router_node(state: AgentState) -> Command:
     """
     Route incoming messages to the correct phase node.
@@ -23,6 +46,7 @@ async def router_node(state: AgentState) -> Command:
     always starting at INTAKE.
 
     Routing logic:
+    - HITL messages → route to checkpoint-specific node
     - phase == "intake" or unset → intake node
     - phase == "advise" → advise node
     - phase == "research" → research node (edge case, shouldn't receive messages)
@@ -34,6 +58,30 @@ async def router_node(state: AgentState) -> Command:
         Command routing to the appropriate node
     """
     current_phase = state.get("current_phase", "intake")
+    messages = state.get("messages", [])
+
+    # Check for HITL synthetic message
+    if messages:
+        last_message = messages[-1]
+        if hasattr(last_message, "content"):
+            hitl_parsed = parse_hitl_message(last_message.content)
+            if hitl_parsed:
+                checkpoint, choice = hitl_parsed
+                logger.info(
+                    f"Router: HITL message detected - checkpoint={checkpoint}, choice={choice}"
+                )
+
+                # Route based on checkpoint type
+                if checkpoint == "requirements":
+                    logger.info("Router: HITL directing to INTAKE")
+                    return Command(goto="intake")
+                elif checkpoint == "fields":
+                    logger.info("Router: HITL directing to RESEARCH")
+                    return Command(goto="research")
+                elif checkpoint == "intent":
+                    logger.info("Router: HITL directing to ADVISE")
+                    return Command(goto="advise")
+
     logger.info(f"Router: current_phase={current_phase}")
 
     if current_phase == "advise":
@@ -124,10 +172,24 @@ class WorkflowResult:
         content: str,
         citations: list[dict] | None = None,
         sources: list[str] | None = None,
+        # HITL state
+        action_choices: list[str] | None = None,
+        awaiting_requirements_confirmation: bool = False,
+        awaiting_fields_confirmation: bool = False,
+        awaiting_intent_confirmation: bool = False,
+        # Phase tracking
+        current_phase: str = "intake",
     ):
         self.content = content
         self.citations = citations or []
         self.sources = sources or []
+        # HITL state
+        self.action_choices = action_choices
+        self.awaiting_requirements_confirmation = awaiting_requirements_confirmation
+        self.awaiting_fields_confirmation = awaiting_fields_confirmation
+        self.awaiting_intent_confirmation = awaiting_intent_confirmation
+        # Phase tracking
+        self.current_phase = current_phase
 
 
 async def process_message(
@@ -216,10 +278,24 @@ async def process_message_with_state(
         citations = result.get("web_search_citations", [])
         sources = result.get("web_search_sources", [])
 
+        # Extract HITL state
+        action_choices = result.get("action_choices")
+        awaiting_requirements = result.get("awaiting_requirements_confirmation", False)
+        awaiting_fields = result.get("awaiting_fields_confirmation", False)
+        awaiting_intent = result.get("awaiting_intent_confirmation", False)
+
+        # Extract current phase
+        current_phase = result.get("current_phase", "intake")
+
         return WorkflowResult(
             content=content,
             citations=citations,
             sources=sources,
+            action_choices=action_choices,
+            awaiting_requirements_confirmation=awaiting_requirements,
+            awaiting_fields_confirmation=awaiting_fields,
+            awaiting_intent_confirmation=awaiting_intent,
+            current_phase=current_phase,
         )
 
     except Exception as e:

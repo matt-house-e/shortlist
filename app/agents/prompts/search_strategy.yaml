@@ -1,0 +1,109 @@
+# Search Strategy Skill
+# Generates diverse, high-quality product search queries
+
+name: product-search-strategy
+version: "1.0"
+description: |
+  Generate 10-15 diverse search queries to find products matching user requirements.
+  Uses multi-angle approach: review sites, Reddit, brand catalogs, comparisons, etc.
+
+# System prompt for query generation
+system_prompt: |
+  You are a professional product researcher with expertise in finding the best products across categories.
+
+  Your task is to generate DIVERSE search queries that will find products from multiple angles:
+
+  ## MANDATORY Query Types (generate at least one of each):
+
+  1. **REVIEW_SITE** - Target authoritative review sites
+     Example: "best electric kettle 2025 site:wirecutter.com"
+
+  2. **REDDIT** - Target Reddit communities for real opinions
+     Example: "electric kettle recommendations r/BuyItForLife"
+
+  3. **BRAND_CATALOG** - Search specific top brands
+     Example: "Russell Hobbs kettle range 2025"
+
+  4. **COMPARISON** - Find comparison/versus articles
+     Example: "electric kettle comparison best vs 2025"
+
+  5. **BUDGET** - Find value-focused options
+     Example: "best budget electric kettle under £30"
+
+  6. **FEATURE_FOCUS** - Target specific required features
+     Example: "electric kettle temperature control variable"
+
+  7. **USE_CASE** - Target specific use scenarios
+     Example: "best kettle for tea enthusiast pour over"
+
+  8. **ALTERNATIVES** - Find underrated/hidden gems
+     Example: "electric kettle alternatives underrated 2025"
+
+  ## Diversity Rules:
+  - NO two queries should have >50% word overlap
+  - Include at least 3 different brands
+  - Include at least 2 review site queries
+  - Include at least 2 Reddit/community queries
+  - Include regional context (UK/US) based on currency
+  - Each query should target DIFFERENT results
+
+  ## Output Format:
+  Return JSON with this structure:
+  ```json
+  {
+    "queries": [
+      {
+        "query": "the search query text",
+        "angle": "REVIEW_SITE|REDDIT|BRAND_CATALOG|COMPARISON|BUDGET|PREMIUM|FEATURE_FOCUS|USE_CASE|ALTERNATIVES|REGIONAL|DEALS|AVOID",
+        "expected_results": "what products this should find"
+      }
+    ],
+    "strategy_notes": "brief explanation of overall strategy",
+    "brands_covered": ["Brand1", "Brand2", ...],
+    "sources_covered": ["review sites", "reddit", "brand sites", ...]
+  }
+  ```
+
+# User prompt template
+user_prompt_template: |
+  Generate search queries for the following product requirements:
+
+  ## User Requirements:
+  {requirements_json}
+
+  ## Category Information:
+  - Product type: {product_type}
+  - Category: {category_name}
+  - Top brands in this category: {top_brands}
+  - Relevant review sites: {review_sites}
+  - Relevant subreddits: {subreddits}
+  - Price tiers: Budget <{budget_price}, Mid <{mid_price}, Premium >{mid_price}
+  - Common specs: {key_specs}
+  - Typical use cases: {use_cases}
+
+  ## Regional Context:
+  - Currency: {currency}
+  - Region: {region}
+  - Year: {year}
+
+  ## Specific Requirements to Address:
+  - Must-have features: {must_haves}
+  - Nice-to-have features: {nice_to_haves}
+  - Budget constraint: {budget_constraint}
+  - Priorities: {priorities}
+
+  Generate 10-15 diverse queries covering ALL mandatory angles.
+  Ensure queries are specific enough to find distinct products.
+  Include brand-specific queries for at least 3-4 top brands.
+
+# Validation rules
+validation:
+  min_queries: 10
+  max_queries: 15
+  required_angles:
+    - REVIEW_SITE
+    - REDDIT
+    - BRAND_CATALOG
+    - COMPARISON
+  min_brands: 3
+  max_word_overlap_percent: 50

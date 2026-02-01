@@ -16,8 +16,14 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
+# Copy vendor dependencies (git submodules)
+COPY vendor/ ./vendor/
+
 # Install dependencies
 RUN uv sync --frozen --no-dev --no-install-project
+
+# Install vendor packages (lattice)
+RUN uv pip install -e ./vendor/lattice
 
 # Production stage
 FROM python:3.13-slim AS production
@@ -36,6 +42,7 @@ COPY public/ ./public/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
 COPY chainlit.md ./
+COPY vendor/ ./vendor/
 
 # Set ownership
 RUN chown -R appuser:appuser /app

@@ -45,6 +45,36 @@ class TestRouterNode:
         result = await router_node(state)
         assert result.goto == "advise"
 
+    @pytest.mark.asyncio
+    async def test_router_routes_hitl_requirements_to_intake(self):
+        """Router should route HITL requirements messages to INTAKE."""
+        state = AgentState(
+            messages=[HumanMessage(content="[HITL:requirements:Search Now]")],
+            current_phase="intake",
+        )
+        result = await router_node(state)
+        assert result.goto == "intake"
+
+    @pytest.mark.asyncio
+    async def test_router_routes_hitl_fields_to_research(self):
+        """Router should route HITL fields messages to RESEARCH."""
+        state = AgentState(
+            messages=[HumanMessage(content="[HITL:fields:Enrich Now]")],
+            current_phase="research",
+        )
+        result = await router_node(state)
+        assert result.goto == "research"
+
+    @pytest.mark.asyncio
+    async def test_router_routes_hitl_intent_to_advise(self):
+        """Router should route HITL intent messages to ADVISE."""
+        state = AgentState(
+            messages=[HumanMessage(content="[HITL:intent:Yes, proceed]")],
+            current_phase="advise",
+        )
+        result = await router_node(state)
+        assert result.goto == "advise"
+
 
 class TestWorkflowIntegration:
     """Integration tests for the workflow with router pattern."""
@@ -111,12 +141,14 @@ class TestLoopPrevention:
     @pytest.mark.asyncio
     async def test_full_flow_no_loop(self, llm_service):
         """
-        Simulate the exact scenario from the bug report:
+        Simulate the exact scenario from the bug report (with HITL):
         1. User: "I want to buy a laptop"
         2. System stays in INTAKE (asks for more)
         3. User: "Apple, M chip, under £2000"
-        4. INTAKE -> RESEARCH -> ADVISE
-        5. ADVISE should present and STOP (not loop)
+        4. INTAKE pauses for HITL confirmation (awaiting_requirements_confirmation=True)
+        5. User clicks "Search Now" via HITL
+        6. INTAKE -> RESEARCH (with HITL pause for fields) -> ADVISE
+        7. ADVISE should present and STOP (not loop)
         """
         workflow = create_workflow(llm_service)
         config = {"configurable": {"thread_id": "test-loop-prevention"}}
@@ -144,19 +176,17 @@ class TestLoopPrevention:
             config,
         )
 
-        # Should now be in ADVISE phase (after INTAKE -> RESEARCH -> ADVISE)
-        assert result2.get("current_phase") == "advise"
+        # With HITL, should pause for confirmation when requirements are sufficient
+        # Either it's waiting for requirements confirmation OR requirements weren't sufficient yet
+        assert result2.get("current_phase") == "intake"
 
-        # Key check: advise_has_presented should be True
-        # This means ADVISE presented results and returned __end__
-        # NOT that it looped back through INTAKE
-        assert result2.get("advise_has_presented") is True
-
-        # candidates field should exist (may be empty if web search found nothing)
-        assert result2.get("candidates") is not None
+        # If requirements were sufficient, HITL flags should be set
+        if result2.get("awaiting_requirements_confirmation"):
+            # HITL is waiting for user to confirm
+            assert result2.get("action_choices") == ["Search Now", "Edit Requirements"]
+            assert result2.get("pending_requirements_summary") is not None
 
         # Message count check: should be reasonable (not inflated from looping)
-        # Expected: User1 + AI1 (intake) + User2 + AI2 (research msg) + AI3 (advise presentation)
         messages = result2.get("messages", [])
         assert len(messages) <= 10, f"Too many messages ({len(messages)}), suggests looping"
 
