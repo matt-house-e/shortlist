@@ -48,10 +48,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    profiles:
-      - migrate
+    restart: "no"
 
-  # Main application (optional - for testing production build locally)
+  # Main application
   web:
     build:
       context: .
@@ -59,6 +58,8 @@ services:
     container_name: agent-template-web
     # Use host network for LocalStack S3 presigned URLs to work
     network_mode: "host"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agent_template
       - S3_ENDPOINT_URL=http://localhost:4566
@@ -75,8 +76,9 @@ services:
         condition: service_healthy
       localstack:
         condition: service_healthy
-    profiles:
-      - web
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   postgres_data:

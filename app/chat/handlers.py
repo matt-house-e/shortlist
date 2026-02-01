@@ -24,17 +24,74 @@ logger = get_logger(__name__)
 
 
 # =============================================================================
+# Agent Display Names
+# =============================================================================
+
+PHASE_TO_AGENT_NAME = {
+    "intake": "Intake Agent",
+    "research": "Research Agent",
+    "advise": "Advisor Agent",
+}
+
+# Toast messages for phase transitions
+PHASE_TRANSITION_TOASTS = {
+    ("intake", "research"): {
+        "title": "Moving to Research",
+        "description": "Searching for products...",
+    },
+    ("research", "advise"): {
+        "title": "Analysis Complete",
+        "description": "Ready to present recommendations",
+    },
+    ("advise", "intake"): {
+        "title": "Refining Requirements",
+        "description": "Let's update your criteria",
+    },
+    ("advise", "research"): {
+        "title": "Finding More Options",
+        "description": "Searching for additional products...",
+    },
+}
+
+
+def get_agent_name(phase: str) -> str:
+    """Get the display name for an agent based on the current phase."""
+    return PHASE_TO_AGENT_NAME.get(phase, "Assistant")
+
+
+async def emit_phase_transition_toast(previous_phase: str, current_phase: str) -> None:
+    """Emit a toast notification when the phase changes."""
+    if previous_phase == current_phase:
+        return
+
+    toast_config = PHASE_TRANSITION_TOASTS.get((previous_phase, current_phase))
+    if toast_config:
+        await cl.context.emitter.emit(
+            "ui:toast",
+            {
+                "title": toast_config["title"],
+                "description": toast_config["description"],
+                "type": "info",
+            },
+        )
+        logger.info(f"Phase transition toast: {previous_phase} -> {current_phase}")
+
+
+# =============================================================================
 # Citation Formatting
 # =============================================================================
 
 
-async def render_action_buttons(result: WorkflowResult, message_content: str) -> None:
+async def render_action_buttons(
+    result: WorkflowResult, message_content: str, agent_name: str
+) -> None:
     """
     Render action buttons if the workflow result has action choices.
 
     Args:
         result: WorkflowResult containing potential HITL state
         message_content: The message content to display with buttons
+        agent_name: The display name of the agent sending the message
     """
     action_choices = result.action_choices
     if not action_choices:
@@ -66,7 +123,7 @@ async def render_action_buttons(result: WorkflowResult, message_content: str) ->
     cl.user_session.set("current_actions", actions)
 
     # Send message with action buttons
-    await cl.Message(content=message_content, actions=actions, author="Assistant").send()
+    await cl.Message(content=message_content, actions=actions, author=agent_name).send()
 
 
 async def remove_current_actions() -> None:
@@ -187,6 +244,7 @@ async def on_chat_start():
     cl.user_session.set("llm_service", llm_service)
     cl.user_session.set("workflow_id", workflow_id)
     cl.user_session.set("thread_id", thread_id)
+    cl.user_session.set("previous_phase", "intake")  # Track phase for toast notifications
 
     logger.info(f"Session initialized: workflow_id={workflow_id}, thread_id={thread_id}")
 
@@ -217,28 +275,31 @@ async def on_hitl_action(action: cl.Action):
 
     logger.info(f"Processing HITL synthetic message: {synthetic_message}")
 
-    # Create status indicator
-    async with cl.Step(name="Processing", type="run") as step:
-        step.input = f"Button: {choice}"
+    # Process through workflow
+    result = await process_message_with_state(
+        workflow=workflow,
+        message=synthetic_message,
+        user_id=user_id,
+        session_id=session_id,
+    )
 
-        # Process through workflow
-        result = await process_message_with_state(
-            workflow=workflow,
-            message=synthetic_message,
-            user_id=user_id,
-            session_id=session_id,
-        )
+    # Handle phase transition toast
+    previous_phase = cl.user_session.get("previous_phase", "intake")
+    current_phase = result.current_phase
+    await emit_phase_transition_toast(previous_phase, current_phase)
+    cl.user_session.set("previous_phase", current_phase)
 
-        step.output = result.content
+    # Get agent name for the current phase
+    agent_name = get_agent_name(current_phase)
 
     # Format response with citations if available
     response_content = format_response_with_citations(result.content, result.citations)
 
     # Check if we need to render action buttons
     if result.action_choices:
-        await render_action_buttons(result, response_content)
+        await render_action_buttons(result, response_content, agent_name)
     else:
-        await cl.Message(content=response_content, author="Assistant").send()
+        await cl.Message(content=response_content, author=agent_name).send()
 
 
 @cl.on_message
@@ -273,28 +334,31 @@ async def on_message(message: cl.Message):
     user_id = user.identifier if user else "anonymous"
     session_id = cl.user_session.get("id", "unknown")
 
-    # Create status indicator
-    async with cl.Step(name="Processing", type="run") as step:
-        step.input = sanitized_content
+    # Process through workflow
+    result = await process_message_with_state(
+        workflow=workflow,
+        message=sanitized_content,
+        user_id=user_id,
+        session_id=session_id,
+    )
 
-        # Process through workflow
-        result = await process_message_with_state(
-            workflow=workflow,
-            message=sanitized_content,
-            user_id=user_id,
-            session_id=session_id,
-        )
+    # Handle phase transition toast
+    previous_phase = cl.user_session.get("previous_phase", "intake")
+    current_phase = result.current_phase
+    await emit_phase_transition_toast(previous_phase, current_phase)
+    cl.user_session.set("previous_phase", current_phase)
 
-        step.output = result.content
+    # Get agent name for the current phase
+    agent_name = get_agent_name(current_phase)
 
     # Format response with citations if available
     response_content = format_response_with_citations(result.content, result.citations)
 
     # Check if we need to render action buttons
     if result.action_choices:
-        await render_action_buttons(result, response_content)
+        await render_action_buttons(result, response_content, agent_name)
     else:
-        await cl.Message(content=response_content, author="Assistant").send()
+        await cl.Message(content=response_content, author=agent_name).send()
 
 
 @cl.on_chat_end
