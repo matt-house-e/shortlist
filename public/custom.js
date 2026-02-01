@@ -136,11 +136,9 @@
   function setFavicon(isDark) {
     let favicon = document.querySelector('link[rel="icon"]');
 
-    // Only switch if custom favicons exist
-    // For now, this is a placeholder - uncomment when you add favicons
-    // if (favicon) {
-    //   favicon.href = isDark ? FAVICON_DARK : FAVICON_LIGHT;
-    // }
+    if (favicon) {
+      favicon.href = isDark ? FAVICON_DARK : FAVICON_LIGHT;
+    }
   }
 
   const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
