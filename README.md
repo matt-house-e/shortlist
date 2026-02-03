@@ -1,5 +1,9 @@
 # Shortlist
 
+<p align="center">
+  <img src="docs/images/banner.png" alt="Shortlist - Curate Your Choices" width="800">
+</p>
+
 **AI-powered product research and comparison.** Tell Shortlist what you want to buy, and it builds a curated comparison table with trade-off analysis.
 
 <p align="center">
@@ -41,19 +45,20 @@ Manual product research is tedious. Users spend hours across review sites, retai
 >
 > **User:** Find me 5 more like the Fellow but under £40
 
+<p align="center">
+  <img src="docs/images/demo.png" alt="Shortlist demo - gaming laptop search" width="800">
+</p>
+
 ---
 
 ## Architecture
 
 Shortlist uses a **three-phase state-driven workflow**. All phases share a single state object, and transitions are determined by conditions on that state.
 
-```
-┌─────────┐     ┌──────────┐     ┌────────┐
-│ INTAKE  │────▶│ RESEARCH │────▶│ ADVISE │───▶ END
-└─────────┘     └──────────┘     └────┬───┘
-     ▲                                │
-     └────────────────────────────────┘
-                 (refinement)
+```mermaid
+flowchart LR
+    INTAKE --> RESEARCH --> ADVISE --> END
+    ADVISE -.->|refinement| INTAKE
 ```
 
 | Phase | Nature | Purpose |
